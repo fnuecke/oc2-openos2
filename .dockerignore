@@ -1,0 +1,2 @@
+# The Dockerfile copies nothing; sources are bind-mounted at run time.
+*

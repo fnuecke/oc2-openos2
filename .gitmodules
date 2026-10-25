@@ -1,0 +1,9 @@
+[submodule "external/lua"]
+	path = external/lua
+	url = https://github.com/lua/lua.git
+[submodule "external/lua-cjson"]
+	path = external/lua-cjson
+	url = https://github.com/openresty/lua-cjson.git
+[submodule "external/tlsf"]
+	path = external/tlsf
+	url = https://github.com/mattconte/tlsf.git
