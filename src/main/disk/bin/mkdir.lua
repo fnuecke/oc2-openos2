@@ -20,8 +20,8 @@ local function mkdir(path)
     return true
   end
   if options.p then
-    local parent = path:match("^(.+)/[^/]+$")
-    if parent then
+    local parent = require("path").path(path)
+    if parent ~= "/" then
       local ok, reason = mkdir(parent)
       if not ok then
         return nil, reason

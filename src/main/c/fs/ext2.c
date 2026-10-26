@@ -1254,15 +1254,49 @@ void ext2_mount_all(void) {
     }
 }
 
+static int mark_clean(void) {
+    if (fs->medium != FS_MEDIUM_EXT2 || !fs->writable || fs->gone) {
+        return 0;
+    }
+    SB->state |= STATE_CLEAN;
+    fs->super_dirty = 1;
+    return flush_metadata();
+}
+
 void ext2_unmount_all(void) {
     for (int i = 0; i < vblk_count(); i++) {
         fs = mounts[i];
-        if (fs != NULL && fs->medium == FS_MEDIUM_EXT2 && fs->writable && !fs->gone) {
-            SB->state |= STATE_CLEAN;
-            fs->super_dirty = 1;
-            flush_metadata();
+        if (fs != NULL) {
+            mark_clean();
         }
     }
+}
+
+static int enter_mount_point(const char *path, u32 serial);
+static bool has_open_files(const struct mount *m);
+static void report(const char *old_path, int device);
+
+int ext2_unmount(const char *path, const u32 serial) {
+    const int result = enter_mount_point(path, serial);
+    if (result != 0) {
+        return result;
+    }
+    if (fs == root) {
+        return FS_IS_ROOT;
+    }
+    if (has_open_files(fs) || fs->raw_readers > 0 || fs->detached) {
+        return FS_BUSY;
+    }
+    const int cleaned = mark_clean();
+    if (cleaned != 0) {
+        return cleaned;
+    }
+    char old_path[sizeof(fs->path)];
+    strcpy(old_path, fs->path);
+    const int device = fs->device;
+    unmount(fs);
+    report(old_path, device);
+    return 0;
 }
 
 static void remount(const int device) {

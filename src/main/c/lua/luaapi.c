@@ -305,6 +305,10 @@ static int l_fs_format(lua_State *L) {
     return ok_or_fail(L, fs_format(path, label, force, serial));
 }
 
+static int l_fs_unmount(lua_State *L) {
+    return ok_or_fail(L, fs_unmount(check_path(L, 1), opt_serial(L, 2)));
+}
+
 /* fs.label(path [, label [, serial]]) -> the label, "" if none; with a label, sets it. */
 static int l_fs_label(lua_State *L) {
     const char *path = check_path(L, 1);
@@ -338,6 +342,7 @@ static const luaL_Reg fs_lib[] = {
     {"mounts", l_fs_mounts},
     {"format", l_fs_format},
     {"label", l_fs_label},
+    {"unmount", l_fs_unmount},
     {"openRaw", l_fs_open_raw},
     {NULL, NULL},
 };
@@ -654,7 +659,12 @@ static int l_io_lines(lua_State *L) {
     }
     f->fd = fd;
     lua_replace(L, 1);
-    return push_lines(L, 1, 1);
+    push_lines(L, 1, 1);
+    /* Like liolib.c, the file is the closing value of a generic for, so a break closes it. */
+    lua_pushnil(L);
+    lua_pushnil(L);
+    lua_pushvalue(L, 1);
+    return 4;
 }
 
 static int l_io_write(lua_State *L) {

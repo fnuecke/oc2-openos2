@@ -35,6 +35,8 @@ static int power_signaled; /* the "shutdown" or "reboot" signal is queued */
 
 static lua_State *main_state;
 static lua_State *running; /* the coroutine running now, see resume */
+static int background_depth; /* background coroutines in the chain of resumes, see l_set_background */
+static volatile int interrupt_deferred; /* Ctrl+C came while background code ran */
 static const char *volatile pending_error;
 
 /* ---------------------------------------------------------------------------------------- */
@@ -67,7 +69,11 @@ static void raise_in_running(const char *message) {
 }
 
 static void on_interrupt(void) {
-    raise_in_running(INTERRUPTED);
+    if (background_depth > 0) {
+        interrupt_deferred = 1;
+    } else {
+        raise_in_running(INTERRUPTED);
+    }
 }
 
 static void on_watchdog(void) {
@@ -92,10 +98,19 @@ static int resume(lua_State *L, lua_State *co, const int narg) {
     }
     lua_xmove(L, co, narg);
     lua_State *previous = running;
+    const bool background = background_depth > 0 || *(unsigned char *) lua_getextraspace(co) != 0;
     running = co;
+    background_depth += background;
     int nres;
     const int status = lua_resume(co, L, narg, &nres);
     running = previous;
+    background_depth -= background;
+    if (background && background_depth == 0 && interrupt_deferred) {
+        /* The resumer raises it, once it is done with the results, see l_set_background. */
+        interrupt_deferred = 0;
+        console_clear_interrupt();
+        drop_console_signals(L);
+    }
     if (error_pending(co)) {
         /* Interrupted just as it yielded or ended: the error goes to the resumer instead. */
         lua_sethook(co, NULL, 0, 0);
@@ -150,6 +165,15 @@ static int l_wrapped(lua_State *L) {
         return lua_error(L);
     }
     return r;
+}
+
+/* coroutine.setBackground(co): Ctrl+C does not hit co or the coroutines it resumes. The resumer of co
+ * checks console.interrupts() and raises "interrupted!" itself, see /lib/thread.lua. */
+static int l_set_background(lua_State *L) {
+    lua_State *co = lua_tothread(L, 1);
+    luaL_argexpected(L, co, 1, "coroutine");
+    *(unsigned char *) lua_getextraspace(co) = 1;
+    return 0;
 }
 
 static int l_wrap(lua_State *L) {
@@ -376,6 +400,8 @@ void signal_init(lua_State *L) {
     lua_setfield(L, -2, "resume");
     lua_pushcfunction(L, l_wrap);
     lua_setfield(L, -2, "wrap");
+    lua_pushcfunction(L, l_set_background);
+    lua_setfield(L, -2, "setBackground");
     lua_pop(L, 1);
 }
 

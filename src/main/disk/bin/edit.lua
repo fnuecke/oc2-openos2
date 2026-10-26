@@ -25,7 +25,7 @@ if not args[1] then
   return shell.usage(USAGE)
 end
 local path = shell.resolve(args[1])
-local name = path:match("[^/]*$")
+local name = require("path").name(path) or path
 local stat = fs.stat(path)
 if stat and stat.isDir then
   io.stderr:write("edit: ", args[1], ": Is a directory\n")
@@ -74,14 +74,12 @@ local function emit(...)
   end
 end
 
--- Draws a screen row from column `from` (default: the left edge) to its end.
 local function drawLine(row, from)
   from = from or left
   local line = lines[top + row - 1] or ""
   emit("\27[", row, ";", from - left + 1, "H", line:sub(from, left + width - 1), "\27[K")
 end
 
--- Draws the part that changed and the position, which is at the end, so usually a few characters.
 local function drawStatus()
   local info = string.format(" %s%s  %s", name, dirty and " *" or "", message)
   if #cutBuffer > 0 then
@@ -169,7 +167,6 @@ local function flush()
   output = {}
 end
 
--- Moves the cursor to the next match of text from (x, y), wrapping around. Returns whether it found one.
 local function search(text, x, y)
   for i = 0, #lines do
     local row = (y - 1 + i) % #lines + 1
@@ -188,7 +185,6 @@ local function findNext()
   end
 end
 
--- Reads the text to find in the status line, and moves to the first match while it is typed.
 local function find()
   local startX, startY = cx, cy
   findText = ""
@@ -224,12 +220,14 @@ local function deleteLine()
   cy, cx = math.min(cy, #lines), 1
 end
 
+local WHEEL_LINES = 3
+
 local function step()
-  local key = term.key()
+  local key, data, cut = term.key()
   local line = lines[cy]
   local lineBefore = cy
   local changed, full = false, false
-  local from = cx -- the first column that changed
+  local from = cx
   message = HELP
   if key == "\23" then
     if dirty and not closeArmed then
@@ -321,6 +319,44 @@ local function step()
     cx = 1
   elseif key == "end" then
     cx = #line + 1
+  elseif key == "ctrl-left" then
+    if cx > 1 then
+      cx = term.previousWord(line, cx - 1) + 1
+    elseif cy > 1 then
+      cy = cy - 1
+      cx = #lines[cy] + 1
+    end
+  elseif key == "ctrl-right" then
+    if cx <= #line then
+      cx = term.nextWord(line, cx - 1) + 1
+    elseif cy < #lines then
+      cy, cx = cy + 1, 1
+    end
+  elseif key == "mouse" then
+    if data.button == 64 or data.button == 65 then
+      cy = math.min(math.max(cy + (data.button == 64 and -WHEEL_LINES or WHEEL_LINES), 1), #lines)
+      cx = math.min(cx, #lines[cy] + 1)
+    elseif data.button == 0 and data.pressed and data.y <= height then
+      cy = math.min(top + data.y - 1, #lines)
+      cx = math.min(left + data.x - 1, #lines[cy] + 1)
+    end
+  elseif key == "paste" then
+    local pasted = {}
+    for text in (data:gsub("\r\n?", "\n"):gsub("\t", "  ") .. "\n"):gmatch("(.-)\n") do
+      pasted[#pasted + 1] = (text:gsub("%c", " "))
+    end
+    local after = line:sub(cx)
+    lines[cy] = line:sub(1, cx - 1) .. pasted[1]
+    for i = 2, #pasted do
+      table.insert(lines, cy + i - 1, pasted[i])
+    end
+    cy = cy + #pasted - 1
+    cx = #lines[cy] + 1
+    lines[cy] = lines[cy] .. after
+    changed, full = true, true
+    if cut then
+      message = "paste cut to 16 KiB"
+    end
   end
   if cy ~= lineBefore then
     cutting = false
@@ -335,7 +371,13 @@ local function step()
   end
 end
 
-console.write("\27[?1049h")
+local MODES = {"1049", "1000", "1006", "1007", "2004"}
+local function setModes(suffix, first, last, step)
+  for i = first, last, step do
+    console.write("\27[?", MODES[i], suffix)
+  end
+end
+setModes("h", 1, #MODES, 1)
 local ok, err = system.rawpcall(function()
   redraw()
   while running do
@@ -351,7 +393,7 @@ local ok, err = system.rawpcall(function()
     end
   end
 end)
-console.write("\27[?1049l")
+setModes("l", #MODES, 1, -1)
 if not ok then
   error(err, 0)
 end

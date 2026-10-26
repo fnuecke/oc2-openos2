@@ -11,7 +11,7 @@ local pendingInterrupts = 0 -- console.interrupts() when pending was pulled
 local lastWasCR = false
 local column = 0
 
-local function nextByte(timeout)
+local function refill(timeout)
   if console.interrupts() ~= pendingInterrupts then
     pending, position = "", 1 -- typed ahead of a Ctrl+C
   end
@@ -20,8 +20,15 @@ local function nextByte(timeout)
     if data then
       pending, position, pendingInterrupts = data, 1, console.interrupts()
     elseif timeout then
-      return nil
+      return false
     end
+  end
+  return true
+end
+
+local function nextByte(timeout)
+  if not refill(timeout) then
+    return nil
   end
   local c = pending:sub(position, position)
   position = position + 1
@@ -33,6 +40,32 @@ local CSI_KEYS = {
   P = "f1", Q = "f2", R = "f3", S = "f4"}
 local TILDE_KEYS = {"home", "insert", "delete", "end", "pageup", "pagedown", "home", "end"}
 
+local PASTE_LIMIT = 16384
+local PASTE_END = "\27[201~"
+local pasting = false -- in a paste that an error cut short: the rest is dropped, see term.key
+
+local function readPaste(timeout)
+  local parts, size, carry = {}, 0, ""
+  pasting = true
+  while refill(timeout) do
+    local chunk = carry .. pending:sub(position)
+    local stop = chunk:find(PASTE_END, 1, true)
+    local text = stop and chunk:sub(1, stop - 1) or chunk:sub(1, -#PASTE_END)
+    carry = stop and "" or chunk:sub(-#PASTE_END + 1)
+    if size < PASTE_LIMIT then
+      parts[#parts + 1] = text:sub(1, PASTE_LIMIT - size)
+    end
+    size = size + #text
+    if stop then
+      pending, position = chunk:sub(stop + #PASTE_END), 1
+      break
+    end
+    position = #pending + 1
+  end
+  pasting = false
+  return table.concat(parts), size > PASTE_LIMIT
+end
+
 local function escapeKey()
   local kind = nextByte(ESCAPE_TIMEOUT)
   if not kind then
@@ -43,9 +76,24 @@ local function escapeKey()
     return "alt-" .. kind
   end
   local parameters, final = "", nextByte(ESCAPE_TIMEOUT)
+  local mouse = final == "<"
+  if mouse then
+    final = nextByte(ESCAPE_TIMEOUT)
+  end
   while final and final:find("^[%d;]") do
     parameters = parameters .. final
     final = nextByte(ESCAPE_TIMEOUT)
+  end
+  if mouse then
+    local button, x, y = parameters:match("^(%d+);(%d+);(%d+)$")
+    if not button or (final ~= "M" and final ~= "m") then
+      return "unknown"
+    end
+    return "mouse", {button = tonumber(button), x = tonumber(x), y = tonumber(y), pressed = final == "M"}
+  end
+  if final == "~" and parameters == "200" then
+    local text, cut = readPaste()
+    return "paste", text, cut
   end
   local code, modifier = parameters:match("^(%d*);?(%d*)$")
   code, modifier = tonumber(code), (tonumber(modifier) or 1) - 1
@@ -67,9 +115,13 @@ end
 
 -- Returns the next key: a single character for printable input and control characters, or a name
 -- such as "enter", "backspace", "tab", "left", "home", "delete", "pageup", "f3" or "escape", with
--- "shift-", "alt-" or "ctrl-" in front for modified keys, e.g. "ctrl-delete". Returns nil
--- after timeout seconds, if given.
+-- "shift-", "alt-" or "ctrl-" in front for modified keys, e.g. "ctrl-delete". "paste" comes with
+-- the pasted text, "mouse" with {button, x, y, pressed} (xterm SGR reporting). Returns nil after
+-- timeout seconds, if given.
 function term.key(timeout)
+  if pasting then
+    readPaste(ESCAPE_TIMEOUT * 10)
+  end
   while true do
     local c = nextByte(timeout)
     if not c then
@@ -95,13 +147,10 @@ function term.key(timeout)
   end
 end
 
--- The errors the kernel raises in running code, by kind. Programs cannot catch them, see /init.lua.
 local SYSTEM_ERRORS = {
   ["interrupted!"] = "interrupt", ["too long without yielding"] = "watchdog",
   ["shutdown requested"] = "shutdown", ["reboot requested"] = "reboot"}
 
--- Returns "interrupt" for Ctrl+C, "watchdog", "shutdown" or "reboot" for the host's power button, or
--- nil if err is no system error.
 function term.systemError(err)
   return SYSTEM_ERRORS[err]
 end
@@ -110,7 +159,6 @@ function term.isSystemError(err)
   return SYSTEM_ERRORS[err] ~= nil
 end
 
--- Returns "shutdown" or "reboot" for a power request from the host, nil for other errors.
 function term.powerRequest(err)
   local kind = SYSTEM_ERRORS[err]
   return (kind == "shutdown" or kind == "reboot") and kind or nil
@@ -140,21 +188,68 @@ function term.write(...)
   end
 end
 
+function term.isTerminal(stream)
+  return stream == term.stream
+end
+
 function term.column()
   return column
 end
 
--- Reads a line with cursor movement and history.
--- Returns nil if Ctrl+D is pressed on an empty line.
-function term.read(prompt, history)
+local pastedLines = {} -- the lines after the first of a paste, read by the next calls, like bash
+
+local function isWordByte(line, i)
+  return line:sub(i, i):find("^[%w_]") ~= nil
+end
+
+function term.previousWord(line, cursor)
+  while cursor > 0 and not isWordByte(line, cursor) do
+    cursor = cursor - 1
+  end
+  while cursor > 0 and isWordByte(line, cursor) do
+    cursor = cursor - 1
+  end
+  return cursor
+end
+
+function term.nextWord(line, cursor)
+  while cursor < #line and not isWordByte(line, cursor + 1) do
+    cursor = cursor + 1
+  end
+  while cursor < #line and isWordByte(line, cursor + 1) do
+    cursor = cursor + 1
+  end
+  return cursor
+end
+
+local function addHistory(history, line)
+  if history and line:find("%S") and history[#history] ~= line then
+    table.insert(history, line)
+    if #history > MAX_HISTORY then
+      table.remove(history, 1)
+    end
+  end
+end
+
+-- Tab calls complete(line, cursor, again), with again set for a second Tab in a row. It returns
+-- the new line and cursor, or nothing after printing below the line, which is then drawn again.
+function term.read(prompt, history, complete)
   if prompt then
     term.write(prompt)
   end
+  if #pastedLines > 0 then
+    local line = table.remove(pastedLines, 1)
+    term.write(line, "\n")
+    addHistory(history, line)
+    return line
+  end
+  console.write("\27[?2004h")
   if column > term.width() - 10 then
     term.write("\n")
   end
   local width = term.width() - column - 1
   local line, cursor, scroll, shown = "", 0, 0, 0
+  local lastKey
   local index = history and #history + 1
 
   local function render()
@@ -173,25 +268,58 @@ function term.read(prompt, history)
   end
 
   while true do
-    local ok, key = system.rawpcall(term.key)
+    local ok, key, pasted, cut = system.rawpcall(term.key)
     if not ok then
-      term.write("\n") -- Ctrl+C: continue on the next line
+      console.write("\27[?2004l")
+      term.write("\n")
       error(key, 0)
     end
     if key == "enter" then
+      console.write("\27[?2004l")
       term.write("\n")
-      if history and line:find("%S") and history[#history] ~= line then
-        table.insert(history, line)
-        if #history > MAX_HISTORY then
-          table.remove(history, 1)
-        end
-      end
+      addHistory(history, line)
       return line
     elseif key == "\4" then
       if line == "" then
+        console.write("\27[?2004l")
         term.write("\n")
         return nil
       end
+    elseif key == "paste" then
+      if cut then
+        term.write("\n(paste cut to 16 KiB)\n", prompt or "")
+        shown, scroll = 0, 0
+      end
+      local lines = {}
+      for text in (pasted:gsub("\r\n?", "\n"):gsub("\n+$", "") .. "\n"):gmatch("(.-)\n") do
+        lines[#lines + 1] = (text:gsub("%c", " "))
+      end
+      local after = line:sub(cursor + 1)
+      line = line:sub(1, cursor) .. lines[1]
+      cursor = #line
+      if #lines == 1 then
+        line = line .. after
+      else
+        for i = 2, #lines do
+          pastedLines[#pastedLines + 1] = lines[i]
+        end
+        pastedLines[#pastedLines] = pastedLines[#pastedLines] .. after
+      end
+    elseif key == "tab" and complete then
+      local newLine, newCursor = complete(line, cursor, lastKey == "tab")
+      if newLine then
+        line, cursor = newLine, newCursor
+      else
+        term.write(prompt or "")
+        shown, scroll = 0, 0
+      end
+    elseif key == "ctrl-left" then
+      cursor = term.previousWord(line, cursor)
+    elseif key == "ctrl-right" then
+      cursor = term.nextWord(line, cursor)
+    elseif key == "alt-backspace" then
+      local start = term.previousWord(line, cursor)
+      line, cursor = line:sub(1, start) .. line:sub(cursor + 1), start
     elseif key == "backspace" then
       if cursor > 0 then
         line = line:sub(1, cursor - 1) .. line:sub(cursor + 1)
@@ -217,6 +345,7 @@ function term.read(prompt, history)
       line = line:sub(1, cursor) .. key .. line:sub(cursor + 1)
       cursor = cursor + 1
     end
+    lastKey = key
     if #key == 1 and key >= " " and cursor == #line and cursor - scroll == shown + 1
       and shown < width then
       console.write(line:sub(-1))

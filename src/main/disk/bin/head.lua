@@ -5,7 +5,6 @@ Usage: head [-n <lines> | -<lines>] [file...]
 Prints the first 10 lines, or as many as given, of the files or the input.
 ]]
 
--- "-n 5", "-n5" and "-5" are the same.
 local raw = {}
 for _, arg in ipairs({...}) do
   local count = arg:match("^%-n(%d+)$") or arg:match("^%-(%d+)$")

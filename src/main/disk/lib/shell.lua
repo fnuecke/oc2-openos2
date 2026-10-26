@@ -1,46 +1,36 @@
--- Command line parsing and program execution. shell.parse is based on OpenOS's shell.
-
 local system = require("system")
 local term = require("term")
 
 local shell = {}
 
-local lastCode = 0
-local redirected = {} -- files opened for the redirects of running commands, oldest first
+-- $?, kept with the streams, so pipeline stages and threads do not change the shell's.
+local function lastCode()
+  return system.streams().lastCode or 0
+end
 
--- Closes redirect files opened after `depth` of them were open, e.g. left open by Ctrl+C, and
--- restores io.input, io.output and io.stderr. Returns the depth and the streams to pass in later.
+local function setLastCode(code)
+  system.streams().lastCode = code
+  return code
+end
+
 function shell.restore(depth, input, output, errors)
+  local streams = system.streams()
+  streams.files = streams.files or {}
+  local files = streams.files
   if depth then
-    for i = #redirected, depth + 1, -1 do
-      pcall(redirected[i].close, redirected[i]) -- the program may have closed it
-      redirected[i] = nil
+    for i = #files, depth + 1, -1 do
+      pcall(files[i].close, files[i]) -- the program may have closed it
+      files[i] = nil
     end
     io.input(input)
     io.output(output)
-    rawset(io, "stderr", errors) -- nil is the console, see /init.lua
+    streams.errors = errors
   end
-  return #redirected, io.input(), io.output(), rawget(io, "stderr")
+  return #files, io.input(), io.output(), streams.errors
 end
 
--- Returns the absolute, normalized form of path, relative to $PWD.
-function shell.resolve(path)
-  if path:sub(1, 1) ~= "/" then
-    path = (os.getenv("PWD") or "/") .. "/" .. path
-  end
-  local parts = {}
-  for part in path:gmatch("[^/]+") do
-    if part == ".." then
-      parts[#parts] = nil
-    elseif part ~= "." then
-      parts[#parts + 1] = part
-    end
-  end
-  return "/" .. table.concat(parts, "/")
-end
+shell.resolve = require("path").resolve
 
--- Splits program arguments into positional arguments and options. "-ab" sets options a and b,
--- "--name" sets name, "--name=value" sets name to value, "--" ends option parsing.
 function shell.parse(...)
   local args, options = {}, {}
   local doneWithOptions = false
@@ -67,9 +57,10 @@ function shell.parse(...)
 end
 
 -- For programs: checks the options against the allowed letters. Returns 0 after printing the usage
--- text for -h or --help, 1 after printing it to stderr for an unknown option, nil if all is well.
+-- text for --help, or -h unless it is an allowed option, 1 after printing it to stderr for an unknown
+-- option, nil if all is well.
 function shell.check(options, usage, allowed)
-  if options.h or options.help then
+  if options.help or (options.h and not (allowed or ""):find("h", 1, true)) then
     io.write(usage)
     return 0
   end
@@ -81,7 +72,6 @@ function shell.check(options, usage, allowed)
   end
 end
 
--- For programs: prints the usage text to stderr and returns 1, the exit code for wrong arguments.
 function shell.usage(usage)
   io.stderr:write(usage)
   return 1
@@ -92,32 +82,39 @@ local function isFile(path)
   return stat ~= nil and not stat.isDir
 end
 
--- Returns the path of the program for a command name: names containing "/" are paths, others are
--- looked up in $PATH, where only *.lua files count. The ".lua" extension is optional.
+local function withExtension(path)
+  for _, extension in ipairs({".luac", ".lua"}) do
+    if isFile(path .. extension) then
+      return path .. extension
+    end
+  end
+end
+
 function shell.which(name)
   if name:find("/") then
     local path = shell.resolve(name)
-    return isFile(path .. ".lua") and path .. ".lua" or isFile(path) and path or nil
+    return withExtension(path) or isFile(path) and path or nil
   end
   for dir in (os.getenv("PATH") or ""):gmatch("[^:]+") do
     local path = shell.resolve(dir .. "/" .. name)
-    if isFile(path .. ".lua") then
-      return path .. ".lua"
-    elseif path:find("%.lua$") and isFile(path) then
+    local program = withExtension(path)
+    if program then
+      return program
+    elseif path:find("%.luac?$") and isFile(path) then
       return path -- not, e.g., oc2's shell scripts in /mnt/builtin/bin
     end
   end
 end
 
--- Lexer: words separated by whitespace, '...' literal, "..." with $NAME, ${NAME} and \" \\ \$,
--- backslash escapes outside quotes, # starts a comment, and the redirections <, > and >>.
 local function variable(line, i)
   local name = line:match("^{([%a_][%w_]*)}", i + 1)
   if name then
     return os.getenv(name) or "", i + #name + 3
   end
   if line:sub(i + 1, i + 1) == "?" then
-    return tostring(lastCode), i + 2
+    return tostring(lastCode()), i + 2
+  elseif line:sub(i + 1, i + 1) == "!" then
+    return shell.lastJob or "", i + 2
   end
   name = line:match("^[%a_][%w_]*", i + 1)
   if not name then
@@ -127,15 +124,18 @@ local function variable(line, i)
 end
 
 local function lex(line)
-  local words, word, quoted = {}, nil, false
-  local function add(s)
+  local words, globs, word, pattern, quoted, wildcard = {}, {}, nil, "", false, false
+  local function add(s, literal)
     word = (word or "") .. s
+    pattern = pattern .. (literal and s:gsub("[*?[\\]", "\\%0") or s)
+    wildcard = wildcard or not literal and s:find("[*?[]") ~= nil
   end
   local function finish()
     if word and (word ~= "" or quoted) then
       words[#words + 1] = word
+      globs[#words] = wildcard and pattern or nil
     end
-    word, quoted = nil, false
+    word, pattern, quoted, wildcard = nil, "", false, false
   end
   local i = 1
   while i <= #line do
@@ -150,11 +150,11 @@ local function lex(line)
       if not close then
         return nil, "Syntax error: Unterminated quoted string"
       end
-      add(line:sub(i + 1, close - 1))
+      add(line:sub(i + 1, close - 1), true)
       quoted, i = true, close + 1
     elseif c == '"' then
       quoted, i = true, i + 1
-      add("")
+      add("", true)
       while true do
         c = line:sub(i, i)
         if c == "" then
@@ -163,19 +163,19 @@ local function lex(line)
           i = i + 1
           break
         elseif c == "\\" and line:find('^["\\$]', i + 1) then
-          add(line:sub(i + 1, i + 1))
+          add(line:sub(i + 1, i + 1), true)
           i = i + 2
         elseif c == "$" then
           local value
           value, i = variable(line, i)
-          add(value)
+          add(value, true)
         else
-          add(c)
+          add(c, true)
           i = i + 1
         end
       end
     elseif c == "\\" then
-      add(line:sub(i + 1, i + 1))
+      add(line:sub(i + 1, i + 1), true)
       quoted, i = true, i + 2
     elseif c == "$" then
       local value
@@ -192,7 +192,7 @@ local function lex(line)
     end
   end
   finish()
-  return words
+  return words, globs
 end
 
 local function toCode(result)
@@ -217,6 +217,8 @@ local function handler(err)
 end
 
 local builtins = {}
+local aliases = {}
+shell.builtins, shell.aliases = builtins, aliases
 
 function builtins.cd(dir)
   local path = shell.resolve(dir or os.getenv("HOME") or "/")
@@ -226,6 +228,14 @@ function builtins.cd(dir)
     return 1
   end
   os.setenv("PWD", path)
+end
+
+builtins["true"] = function()
+  return 0
+end
+
+builtins["false"] = function()
+  return 1
 end
 
 function builtins.pwd()
@@ -257,14 +267,34 @@ function builtins.set(...)
   end
 end
 
+for _, name in ipairs({"alias", "unalias", "source", ".", "jobs", "wait", "kill"}) do
+  builtins[name] = function(...)
+    return require("builtins")[name](...)
+  end
+end
+
 function builtins.unset(...)
   for i = 1, select("#", ...) do
     os.setenv((select(i, ...)), nil)
   end
 end
 
--- Runs a program in its own global environment. Returns its exit code: the returned number, 0 for
--- nil or true, 1 for false or an error, 130 if interrupted.
+-- Programs that run, by pid: {pid, parent, command, streams}. The streams are the record the
+-- program runs with, see system.streams in /init.lua.
+shell.processes = {}
+local nextPid = 0
+
+function shell.cleanup(streams)
+  for i = #(streams.files or {}), 1, -1 do
+    pcall(streams.files[i].close, streams.files[i])
+  end
+  for pid, process in pairs(shell.processes) do
+    if process.streams == streams then
+      shell.processes[pid] = nil
+    end
+  end
+end
+
 function shell.run(path, ...)
   -- `arg` as lua.c sets it, which oc2's programs in /mnt/builtin/bin use.
   local env = setmetatable({arg = table.pack(...)}, {__index = _G})
@@ -274,7 +304,15 @@ function shell.run(path, ...)
     io.stderr:write(reason, "\n")
     return 1
   end
+  local streams = system.streams()
+  local parent = streams.process
+  nextPid = nextPid + 1
+  local process = {pid = nextPid, parent = parent and parent.pid or 0,
+    command = table.concat({path:match("([^/]*)%.luac?$") or path, ...}, " "), streams = streams}
+  shell.processes[process.pid] = process
+  streams.process = process
   local ok, result = system.rawxpcall(program, handler, ...)
+  shell.processes[process.pid], streams.process = nil, parent
   if ok then
     return toCode(result)
   elseif isExit(result) then
@@ -288,13 +326,98 @@ end
 
 local REDIRECT_MODES = {["<"] = "r", [">"] = "w", [">>"] = "a", ["2>"] = "w", ["2>>"] = "a"}
 
--- Runs a command line. Returns the exit code, also available as $?.
-function shell.execute(line)
-  local words, reason = lex(line)
-  if not words then
+local function split(line)
+  local commands, start, i, quote = {}, 1, 1, nil
+  local function cut(op, length)
+    commands[#commands + 1] = {text = line:sub(start, i - 1), op = op}
+    i = i + length
+    start = i
+  end
+  while i <= #line do
+    local c = line:sub(i, i)
+    if quote then
+      if c == quote then
+        quote = nil
+      elseif c == "\\" and quote == '"' then
+        i = i + 1
+      end
+      i = i + 1
+    elseif c == "'" or c == '"' then
+      quote, i = c, i + 1
+    elseif c == "\\" then
+      i = i + 2
+    elseif c == "#" and (i == 1 or line:sub(i - 1, i - 1):find("^%s")) then
+      break
+    elseif c == ";" or c == "\n" then
+      cut(";", 1)
+    elseif line:sub(i, i + 1) == "&&" or line:sub(i, i + 1) == "||" then
+      cut(line:sub(i, i + 1), 2)
+    elseif c == "&" then
+      cut("&", 1)
+      commands.background = true
+    elseif c == "|" then
+      cut("|", 1)
+    else
+      i = i + 1
+    end
+  end
+  if quote then
+    return nil, "Syntax error: Unterminated quoted string"
+  end
+  commands[#commands + 1] = {text = line:sub(start, i - 1), op = ";"}
+  return commands
+end
+
+local runCommand
+
+function shell.execute(line, expanding)
+  local commands, reason = split(line)
+  if not commands then
     io.stderr:write("sh: ", reason, "\n")
-    lastCode = 2
-    return lastCode
+    return setLastCode(2)
+  end
+  for index, command in ipairs(commands) do
+    local previous = index > 1 and commands[index - 1].op
+    if not command.text:find("%S") and (command.op ~= ";" or previous and previous ~= ";" and previous ~= "&") then
+      local token = index == #commands and "newline" or command.op
+      io.stderr:write("sh: syntax error near unexpected token '", token, "'\n")
+      return setLastCode(2)
+    end
+  end
+  if commands.background then
+    commands = require("jobs").group(commands)
+  end
+  local run, pipeline = true, {}
+  for _, command in ipairs(commands) do
+    pipeline[#pipeline + 1] = command.text
+    if command.op == "&" then
+      setLastCode(require("jobs").start(command.text))
+      run, pipeline = true, {}
+    elseif command.op ~= "|" then
+      if run and #pipeline > 1 then
+        setLastCode(require("pipe").run(pipeline))
+      elseif run and command.text:find("%S") then
+        local name, rest = command.text:match("^%s*([^%s]+)(.*)$")
+        expanding = expanding or {}
+        if aliases[name] and not expanding[name] then
+          expanding[name] = true
+          shell.execute(aliases[name] .. rest, expanding)
+          expanding[name] = nil
+        else
+          runCommand(command.text)
+        end
+      end
+      run, pipeline = command.op == ";" or (command.op == "&&") == (lastCode() == 0), {}
+    end
+  end
+  return lastCode()
+end
+
+function runCommand(line)
+  local words, globs = lex(line)
+  if not words then
+    io.stderr:write("sh: ", globs, "\n")
+    return setLastCode(2)
   end
   local args, redirects = {}, {}
   for i, word in ipairs(words) do
@@ -302,16 +425,21 @@ function shell.execute(line)
       local target = words[i + 1]
       if type(target) ~= "string" then
         io.stderr:write("sh: syntax error near unexpected token 'newline'\n")
-        lastCode = 2
-        return lastCode
+        return setLastCode(2)
       end
-      redirects[#redirects + 1] = {mode = REDIRECT_MODES[word.op], path = target, errors = word.op:sub(1, 1) == "2"}
+      local targets = globs[i + 1] and require("glob").expand(globs[i + 1]) or {target}
+      if #targets > 1 then
+        io.stderr:write("sh: ", target, ": ambiguous redirect\n")
+        return setLastCode(1)
+      end
+      redirects[#redirects + 1] = {mode = REDIRECT_MODES[word.op], path = targets[1], errors = word.op:sub(1, 1) == "2"}
     elseif type(words[i - 1]) ~= "table" then
-      args[#args + 1] = word
+      local matches = globs[i] and require("glob").expand(globs[i]) or {word}
+      table.move(matches, 1, #matches, #args + 1, args)
     end
   end
   if #args == 0 then
-    return lastCode
+    return lastCode()
   end
 
   local depth, oldInput, oldOutput, oldErrors = shell.restore()
@@ -320,12 +448,12 @@ function shell.execute(line)
     if not file then
       shell.restore(depth, oldInput, oldOutput, oldErrors)
       io.stderr:write("sh: ", openReason, "\n")
-      lastCode = 1
-      return lastCode
+      return setLastCode(1)
     end
-    redirected[#redirected + 1] = file
+    local files = system.streams().files
+    files[#files + 1] = file
     if redirect.errors then
-      rawset(io, "stderr", file)
+      system.streams().errors = file
     elseif redirect.mode == "r" then
       io.input(file)
     else
@@ -339,8 +467,7 @@ function shell.execute(line)
     if not path then
       io.stderr:write("sh: ", args[1], ": command not found\n")
       shell.restore(depth, oldInput, oldOutput, oldErrors)
-      lastCode = 127
-      return lastCode
+      return setLastCode(127)
     end
   end
 
@@ -355,8 +482,7 @@ function shell.execute(line)
   if not ok then
     error(result, 0)
   end
-  lastCode = result
-  return lastCode
+  return setLastCode(result)
 end
 
 return shell

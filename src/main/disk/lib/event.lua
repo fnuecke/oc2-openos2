@@ -4,7 +4,7 @@ local event = {}
 
 local MAX_SKIPPED = 64
 
-local skipped = {} -- signals passed over by a pull with a name, oldest first
+local skipped = {}
 local interrupts = console.interrupts()
 
 -- Ctrl+C drops console input typed ahead of it, including what was already pulled.
@@ -21,11 +21,13 @@ local function dropTypedAhead()
   end
 end
 
--- Returns the next signal with the given name, or any signal if name is nil. Returns nothing after
--- timeout seconds, or never times out if timeout is nil.
+-- In a thread, signals passed over are not kept: the foreground gets every signal too, see
+-- /lib/thread.lua.
 function event.pull(timeout, name)
+  local threads = package.loaded.thread
+  local inThread = threads and threads.current()
   dropTypedAhead()
-  for i, signal in ipairs(skipped) do
+  for i, signal in ipairs(inThread and {} or skipped) do
     if name == nil or signal[1] == name then
       table.remove(skipped, i)
       return table.unpack(signal, 1, signal.n)
@@ -40,10 +42,12 @@ function event.pull(timeout, name)
     if name == nil or signal[1] == name then
       return table.unpack(signal, 1, signal.n)
     end
-    if #skipped == MAX_SKIPPED then
-      table.remove(skipped, 1)
+    if not inThread then
+      if #skipped == MAX_SKIPPED then
+        table.remove(skipped, 1)
+      end
+      skipped[#skipped + 1] = signal
     end
-    skipped[#skipped + 1] = signal
   end
 end
 

@@ -20,6 +20,7 @@ typedef int ext2_raw_fd; /* see fs_open_raw */
 
 void ext2_mount_all(void);
 void ext2_unmount_all(void);
+int ext2_unmount(const char *path, u32 serial);
 void ext2_poll_media(void);
 void ext2_mounts(fs_mounts_fn fn, void *ctx);
 void ext2_mount_names(struct fs_listing *out);

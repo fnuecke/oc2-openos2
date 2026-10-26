@@ -24,7 +24,7 @@ end
 local code = 0
 for _, arg in ipairs(args) do
   local from = shell.resolve(arg)
-  local target = intoDir and shell.resolve(to .. "/" .. from:match("[^/]*$")) or to
+  local target = intoDir and shell.resolve(to .. "/" .. require("path").name(from)) or to
   local ok, reason = transfer.move(from, target)
   if not ok then
     io.stderr:write("mv: ", reason, "\n")

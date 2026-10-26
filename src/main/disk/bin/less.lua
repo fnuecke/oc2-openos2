@@ -25,7 +25,6 @@ if not file then
 end
 local width, height = term.width() - 1, term.height() - 1 -- the last column can make it wrap
 
--- Long lines are wrapped, so every screen row is one entry.
 local rows = {}
 while true do
   local line, readReason = file:read("l")
@@ -46,7 +45,7 @@ if args[1] then
   file:close()
 end
 
-if not io.output().tty or #rows <= height then
+if not term.isTerminal(io.output()) or #rows <= height then
   for _, row in ipairs(rows) do
     print(row)
   end

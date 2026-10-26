@@ -21,6 +21,31 @@ if script then
   return code
 end
 
+local PROMPT_ESCAPES = {["$"] = "#", e = "\27", n = "\n", ["\\"] = "\\"}
+local function prompt()
+  local ps1 = os.getenv("PS1") or "\\w \\$ "
+  return (ps1:gsub("\\(.)", function(c)
+    return c == "w" and os.getenv("PWD") or PROMPT_ESCAPES[c] or "\\" .. c
+  end):gsub("%$([%a_][%w_]*)", function(name)
+    return os.getenv(name) or ""
+  end))
+end
+
+local home = os.getenv("HOME") or "/"
+local shrc = shell.resolve(home .. "/.shrc")
+if fs.exists(shrc) then
+  local ok, err = system.rawpcall(shell.execute, "source '" .. shrc:gsub("'", "'\\''") .. "'")
+  if not ok and term.powerRequest(err) then
+    error(err, 0)
+  elseif not ok and not (type(err) == "table" and err.exit ~= nil) and term.systemError(err) ~= "interrupt" then
+    io.stderr:write(tostring(err), "\n")
+  end
+end
+
+local function complete(...)
+  return require("completion").complete(...)
+end
+
 local history = {}
 local depth, input, output, errors = shell.restore()
 while true do
@@ -33,7 +58,10 @@ while true do
     if term.column() > 0 then
       term.write("\n")
     end
-    local line = term.read(os.getenv("PWD") .. " # ", history)
+    if package.loaded.jobs then
+      package.loaded.jobs.report()
+    end
+    local line = term.read(prompt(), history, complete)
     if line == nil then
       os.exit(0)
     end

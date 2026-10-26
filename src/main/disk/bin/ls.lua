@@ -17,30 +17,27 @@ if #args == 0 then
   args[1] = "."
 end
 
-local function list(arg)
-  local path = shell.resolve(arg)
-  local stat, reason = fs.stat(path)
-  if not stat then
-    io.stderr:write("ls: cannot access '", arg, "': ", reason, "\n")
-    return false
+local color = term.isTerminal(io.output()) and not os.getenv("NO_COLOR")
+
+-- Like GNU ls's defaults: directories bold blue, programs (Lua files) bold green.
+local function colored(name)
+  if not color then
+    return name
+  elseif name:sub(-1) == "/" then
+    return "\27[01;34m" .. name .. "\27[0m"
+  elseif name:sub(-4) == ".lua" then
+    return "\27[01;32m" .. name .. "\27[0m"
   end
-  local names = {}
-  if not stat.isDir then
-    names[1] = arg
-  else
-    for _, name in ipairs(fs.list(path)) do
-      if options.a or name:sub(1, 1) ~= "." then
-        names[#names + 1] = name
-      end
-    end
-    table.sort(names)
-  end
+  return name
+end
+
+local function show(names, statOf)
   if options.l then
     for _, name in ipairs(names) do
-      local entry = stat.isDir and fs.stat(path .. "/" .. name) or stat
-      print(string.format("%8d %s %s", entry.size, os.date("%Y-%m-%d %H:%M", entry.mtime), name))
+      local entry = statOf(name)
+      print(string.format("%8d %s %s", entry.size, os.date("%Y-%m-%d %H:%M", entry.mtime), colored(name)))
     end
-  elseif not io.output().tty then
+  elseif not term.isTerminal(io.output()) then
     for _, name in ipairs(names) do
       print(name)
     end
@@ -56,22 +53,44 @@ local function list(arg)
       for column = 1, columns do
         local name = names[(column - 1) * rows + row]
         if name then
-          line[#line + 1] = name .. string.rep(" ", width - #name)
+          line[#line + 1] = colored(name) .. string.rep(" ", width - #name)
         end
       end
       print((table.concat(line):gsub("%s+$", "")))
     end
   end
-  return true
 end
 
-local code = 0
-for i, arg in ipairs(args) do
-  if #args > 1 then
-    print((i > 1 and "\n" or "") .. arg .. ":")
-  end
-  if not list(arg) then
+local files, dirs, code = {}, {}, 0
+for _, arg in ipairs(args) do
+  local stat, reason = fs.stat(shell.resolve(arg))
+  if not stat then
+    io.stderr:write("ls: cannot access '", arg, "': ", reason, "\n")
     code = 1
+  elseif stat.isDir then
+    dirs[#dirs + 1] = arg
+  else
+    files[#files + 1] = arg
   end
+end
+table.sort(files)
+table.sort(dirs)
+show(files, function(name)
+  return fs.stat(shell.resolve(name))
+end)
+for i, dir in ipairs(dirs) do
+  if #args > 1 then
+    print((#files > 0 or i > 1) and "\n" .. dir .. ":" or dir .. ":")
+  end
+  local path, names = shell.resolve(dir), {}
+  for _, name in ipairs(fs.list(path)) do
+    if options.a or name:sub(1, 1) ~= "." then
+      names[#names + 1] = name
+    end
+  end
+  table.sort(names)
+  show(names, function(name)
+    return fs.stat(path .. "/" .. name)
+  end)
 end
 return code

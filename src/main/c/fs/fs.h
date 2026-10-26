@@ -75,6 +75,11 @@ int fs_normalize(const char *path, char *out);
 void fs_mounts(void (*fn)(void *ctx, const struct fs_mount *mount), void *ctx);
 /* Marks writable file systems as cleanly unmounted, before power off or reboot. */
 void fs_unmount_all(void);
+/*
+ * Detaches the drive mounted at `path`: marks its file system clean and stops using the medium
+ * until it is changed. Fails like fs_format for / and while files are open on it.
+ */
+int fs_unmount(const char *path, u32 serial);
 /* Looks for medium changes. Every file system call also does. */
 void fs_poll_media(void);
 /*

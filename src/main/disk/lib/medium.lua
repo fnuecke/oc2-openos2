@@ -9,7 +9,6 @@ local KINDS = {
   unknown = "unknown data",
 }
 
--- The fs.mounts() entry of the drive whose mount point path is, or nil and why not.
 function medium.find(path, reading)
   if path == "/" and not reading then
     return nil, "Is the boot medium"
@@ -30,7 +29,6 @@ local function contents(mount)
   return KINDS[mount.medium]
 end
 
--- Returns true if the drive may be overwritten, else nil and why not.
 function medium.check(mount, force)
   if mount.medium == "ext2" and not force then
     return nil, string.format("Holds an ext2 file system with %d KiB used, use -f", (mount.size - mount.free) // 1024)
@@ -42,12 +40,19 @@ function medium.check(mount, force)
   return true
 end
 
--- Describes the drive and asks. Returns whether to go on.
 function medium.confirm(mount)
   print(string.format("%s: drive %d, %d KiB, %s", mount.path, mount.index, mount.size // 1024, contents(mount)))
   io.write("all data on ", mount.path, " will be lost, continue? [y/N] ")
   local answer = io.read()
   return answer ~= nil and answer:match("^[yY]") ~= nil
+end
+
+function medium.mountPoints()
+  local points = {}
+  for _, mount in ipairs(fs.mounts()) do
+    points[mount.path] = true
+  end
+  return points
 end
 
 return medium

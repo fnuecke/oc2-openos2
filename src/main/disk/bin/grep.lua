@@ -34,7 +34,7 @@ if options.i then
       inSet = false
       result[#result + 1] = c
     elseif inSet and c:match("%a") and pattern:sub(i + 1, i + 1) == "-" and pattern:sub(i + 2, i + 2):match("%a") then
-      local last = pattern:sub(i + 2, i + 2) -- a range: a-z becomes a-zA-Z
+      local last = pattern:sub(i + 2, i + 2)
       result[#result + 1] = c:lower() .. "-" .. last:lower() .. c:upper() .. "-" .. last:upper()
       i = i + 2
     elseif c:match("%a") then

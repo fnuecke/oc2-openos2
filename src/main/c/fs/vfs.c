@@ -161,6 +161,16 @@ void fs_unmount_all(void) {
     ext2_unmount_all();
 }
 
+static const char *sys_path(const char *path) {
+    return strncmp(path, "/sys", 4) == 0 && (path[4] == 0 || path[4] == '/') ? path + 4 : NULL;
+}
+
+int fs_unmount(const char *path, const u32 serial) {
+    NORMALIZE(path, normalized_path);
+    const char *rest;
+    return sys_path(path) != NULL || p9_resolve(path, &rest) != NULL ? FS_INVALID : ext2_unmount(path, serial);
+}
+
 void fs_poll_media(void) {
     ext2_poll_media();
 }
@@ -188,10 +198,6 @@ int fs_info(const char *path, u64 *total, u64 *free) {
     const char *rest;
     struct p9 *m = p9_resolve(path, &rest);
     return m != NULL ? p9_info(m, total, free) : ext2_info(path, total, free);
-}
-
-static const char *sys_path(const char *path) {
-    return strncmp(path, "/sys", 4) == 0 && (path[4] == 0 || path[4] == '/') ? path + 4 : NULL;
 }
 
 int fs_stat(const char *path, struct fs_stat *st) {
