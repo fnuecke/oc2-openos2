@@ -3,7 +3,8 @@ local transfer = require("transfer")
 
 local USAGE = [[
 Usage: cp [-r] <from>... <to>
-Copies files, or with -r directories, to a file or into a directory.
+Copies files.
+  -r  copy directories and their contents
 ]]
 
 local args, options = shell.parse(...)

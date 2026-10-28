@@ -67,9 +67,12 @@ function transfer.copy(from, to, recursive)
   end
   for _, name in ipairs(fs.list(from)) do
     name = name:gsub("/$", "")
-    local ok, reason = transfer.copy(from .. "/" .. name, to .. "/" .. name, true)
-    if not ok then
-      return nil, reason
+    local stat = fs.stat(from .. "/" .. name)
+    if not (stat and stat.isDevice) then
+      local ok, reason = transfer.copy(from .. "/" .. name, to .. "/" .. name, true)
+      if not ok then
+        return nil, reason
+      end
     end
   end
   return true

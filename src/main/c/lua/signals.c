@@ -31,12 +31,12 @@ static const char INTERRUPTED[] = "interrupted!";
 static const char WATCHDOG[] = "too long without yielding";
 static const char SHUTDOWN[] = "shutdown requested";
 static const char REBOOT[] = "reboot requested";
-static int power_signaled; /* the "shutdown" or "reboot" signal is queued */
+static int power_signaled;
 
 static lua_State *main_state;
-static lua_State *running; /* the coroutine running now, see resume */
-static int background_depth; /* background coroutines in the chain of resumes, see l_set_background */
-static volatile int interrupt_deferred; /* Ctrl+C came while background code ran */
+static lua_State *running;
+static int background_depth;
+static volatile int interrupt_deferred;
 static const char *volatile pending_error;
 
 /* ---------------------------------------------------------------------------------------- */
@@ -56,7 +56,7 @@ static void interrupt_hook(lua_State *L, lua_Debug *ar) {
     lua_sethook(L, power ? power_hook : NULL, power ? LUA_MASKCOUNT : 0, POWER_HOOK_COUNT);
     console_clear_interrupt();
     if (pending_error == INTERRUPTED) {
-        drop_console_signals(L); /* typed ahead of the Ctrl+C, like the input drivers/console.c still had */
+        drop_console_signals(L);
     }
     lua_pushstring(L, pending_error); /* without a position, programs match the message */
     lua_error(L);
@@ -233,7 +233,7 @@ static int queue_full(lua_State *L) {
 static void collect_kernel_signals(lua_State *L) {
     fs_poll_media();
     push_queue(L);
-    char path[48];
+    char path[FS_MOUNT_PATH_LENGTH];
     const char *what;
     while (!queue_full(L) && fs_take_medium_event(path, sizeof(path), &what)) {
         lua_pushliteral(L, "medium");
@@ -323,16 +323,11 @@ static bool signal_ready(void *ctx) {
         || (power_requested() != 0 && !power_signaled);
 }
 
-static u64 ticks(const lua_Number seconds) {
-    const lua_Number value = seconds * (lua_Number) time_frequency();
-    return !(value > 0) ? 0 : value >= 0x1p62 ? 1ull << 62 : (u64) value;
-}
-
 /* computer.pullSignal([timeout]) -> name, ... or nothing on timeout */
 static int l_pull_signal(lua_State *L) {
-    const u64 deadline = lua_isnoneornil(L, 1) ? TIME_NEVER : time_now() + ticks(luaL_checknumber(L, 1));
+    const u64 deadline = lua_isnoneornil(L, 1) ? TIME_NEVER : time_now() + seconds_to_ticks(luaL_checknumber(L, 1));
     lua_settop(L, 0);
-    watchdog_restart(); /* pullSignal counts as a wait, even if it does not need to */
+    watchdog_restart();
     for (;;) {
         collect_kernel_signals(L);
         const int n = dequeue(L);
@@ -375,7 +370,7 @@ static int l_watchdog(lua_State *L) {
     } else {
         const lua_Number seconds = luaL_checknumber(L, 1);
         luaL_argcheck(L, seconds > 0, 1, "must be positive");
-        watchdog_set(ticks(seconds), on_watchdog);
+        watchdog_set(seconds_to_ticks(seconds), on_watchdog);
     }
     return 0;
 }

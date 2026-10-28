@@ -5,8 +5,6 @@
 #include "internal.h"
 
 #define SCAUSE_INTERRUPT (1ul << 63)
-#define IRQ_S_TIMER 5
-#define IRQ_S_EXTERNAL 9
 
 extern u8 _stack_guard[], _stack_bottom[];
 

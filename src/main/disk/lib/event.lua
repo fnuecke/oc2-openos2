@@ -1,5 +1,3 @@
--- Signals from computer.pullSignal. A pull for one signal name keeps the others for later pulls.
-
 local event = {}
 
 local MAX_SKIPPED = 64
@@ -7,7 +5,6 @@ local MAX_SKIPPED = 64
 local skipped = {}
 local interrupts = console.interrupts()
 
--- Ctrl+C drops console input typed ahead of it, including what was already pulled.
 local function dropTypedAhead()
   local count = console.interrupts()
   if count == interrupts then

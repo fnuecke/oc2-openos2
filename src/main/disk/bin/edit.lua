@@ -1,5 +1,3 @@
--- A small screen editor. Tabs are replaced with two spaces when loading.
-
 local shell = require("shell")
 local system = require("system")
 local term = require("term")
@@ -7,11 +5,11 @@ local term = require("term")
 local USAGE = [[
 Usage: edit <file>
 Edits a text file.
-  Ctrl+S          save
-  Ctrl+W          close, twice with unsaved changes
-  Ctrl+K          cut one or more lines
-  Ctrl+U          paste the cut lines above the current line
-  Ctrl+F          find; Enter or Escape end search mode
+  Ctrl+S               save
+  Ctrl+W               close, twice to discard changes
+  Ctrl+K               cut lines
+  Ctrl+U               paste the cut lines
+  Ctrl+F               find
   Ctrl+G, Ctrl+N, F3   find the next match
   Ctrl+Del, Shift+Del  delete the line
 ]]
@@ -50,7 +48,7 @@ if stat then
     end
   end
   text = nil -- the register keeps the text reachable until reused, even out of scope
-  collectgarbage() -- loading leaves about as much garbage as the text takes
+  collectgarbage()
 end
 if #lines == 0 then
   lines[1] = ""
@@ -62,8 +60,8 @@ local cx, cy, top, left = 1, 1, 1, 1
 local dirty, closeArmed, running = false, false, true
 local HELP = "^S Save  ^W Close  ^F Find  ^K Cut  ^U Uncut"
 local message = HELP
-local cutBuffer, cutting = {}, false -- cutting ends when the cursor moves to another line
-local cutAbove = false -- the last cut took the last line, so the next one is the line above it
+local cutBuffer, cutting = {}, false
+local cutAbove = false
 local findText = ""
 local output = {}
 local shownStatus = ""
@@ -97,8 +95,6 @@ local function drawStatus()
   shownStatus = status
 end
 
--- Moves top and left so the cursor is visible. Returns whether they changed. Horizontal scrolling
--- centers the cursor, so typing past the edge redraws the screen once every half width.
 local function scrollToCursor()
   local oldTop, oldLeft = top, left
   top = math.min(math.max(top, cy - height + 1), cy)
@@ -108,10 +104,8 @@ local function scrollToCursor()
   return top ~= oldTop or left ~= oldLeft
 end
 
-local SAVE_BATCH = 64 -- lines per write, so a big file needs no copy of itself in memory
+local SAVE_BATCH = 64
 
--- Writes a temporary file next to the original and renames it over the original, so a failed
--- save leaves the original as it was. The temporary file gets a name that is not taken yet.
 local function save()
   local temp = path .. "~"
   for i = 1, math.huge do
@@ -121,7 +115,7 @@ local function save()
     temp = path .. "~" .. i
   end
   local created, size = false, 0
-  collectgarbage() -- room for the batches, also when the text nearly fills the memory
+  collectgarbage()
   local ok, reason = system.rawpcall(function()
     local file = assert(io.open(temp, "w"))
     created = true
@@ -276,7 +270,7 @@ local function step()
     cutting, full, lineBefore, cutAbove = true, true, cy, wasLast
   elseif key == "\21" then
     if #lines == 1 and lines[1] == "" and #cutBuffer > 0 then
-      table.remove(lines) -- an empty document is one empty line, which the paste replaces
+      table.remove(lines)
       cy = 1
     end
     for i, cut in ipairs(cutBuffer) do
@@ -384,10 +378,9 @@ local ok, err = system.rawpcall(function()
     flush()
     local stepOk, stepErr = system.rawpcall(step)
     if not stepOk and term.powerRequest(stepErr) then
-      error(stepErr, 0) -- unsaved changes are lost, as with any power off
+      error(stepErr, 0)
     end
     if not stepOk then
-      -- Errors, e.g. running out of memory or Ctrl+C, end the key, not the editor and its text.
       message = term.systemError(stepErr) == "interrupt" and "Ctrl+W to close"
         or "error: " .. tostring(stepErr):gsub("^[^:]*:%d+: ", "")
     end

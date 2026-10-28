@@ -19,7 +19,6 @@ end
 
 local color = term.isTerminal(io.output()) and not os.getenv("NO_COLOR")
 
--- Like GNU ls's defaults: directories bold blue, programs (Lua files) bold green.
 local function colored(name)
   if not color then
     return name

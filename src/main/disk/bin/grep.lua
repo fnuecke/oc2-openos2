@@ -18,8 +18,6 @@ if not pattern then
   return shell.usage(USAGE)
 end
 
--- Ignoring case turns each letter into both cases: "a" into "[aA]", and within a set "a" into "aA"
--- and "a-z" into "a-zA-Z".
 if options.i then
   local result, inSet, i = {}, false, 1
   while i <= #pattern do

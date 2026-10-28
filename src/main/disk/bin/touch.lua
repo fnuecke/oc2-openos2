@@ -2,8 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: touch <file>...
-Creates the files that do not exist yet, empty. Existing files are left as they
-are.
+Creates empty files, if they do not exist.
 ]]
 
 local args, options = shell.parse(...)

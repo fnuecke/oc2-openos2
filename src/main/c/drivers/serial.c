@@ -23,7 +23,7 @@ struct port {
     u32 baud;
     char *rx;
     volatile u32 head, tail; /* interrupt handler writes head, readers tail */
-    int notified; /* reported by serial_take_signal since the last read */
+    int notified;
     u8 ier;
     char name[16];
 };
@@ -136,7 +136,6 @@ bool serial_readable(const int index) {
     return readable;
 }
 
-/* When busy, enables the transmit interrupt until the FIFO empties, so a waiting writer wakes up. */
 bool serial_writable(const int index) {
     struct port *port = &ports[index];
     if (mmio_read8(port->base + UART_LSR) & LSR_THRE) {
@@ -164,7 +163,6 @@ size_t serial_read(const int index, char *dst, const size_t max) {
     return count;
 }
 
-/* Fills the transmit FIFO if it is empty. Returns how many bytes were accepted, 0 if it is busy. */
 size_t serial_write(const int index, const char *src, const size_t len) {
     const struct port *port = &ports[index];
     if (!serial_writable(index)) {

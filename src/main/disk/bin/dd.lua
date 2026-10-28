@@ -3,12 +3,13 @@ local medium = require("medium")
 
 local USAGE = [[
 Usage: dd [-y] [-f] if=<path> of=<path> [bs=n] [count=n] [skip=n] [seek=n]
-Copies a file or a whole medium to a file or a whole medium, e.g. an OS image
-onto a drive, or a drive into a backup file. A mount point of a drive, e.g.
-/mnt/1, means its whole medium. bs is the block size in bytes (default 512, K
-and M suffixes), count the number of blocks, skip and seek the blocks to skip
-in the input and output. Writing to a medium asks first, unless -y, and needs
--f unless the medium is blank. Media take multiples of 512 bytes.
+Copies a file or a whole medium, e.g. /dev/vdb, to a file or a whole medium.
+  -y       do not ask before writing to a medium
+  -f       overwrite a medium that is not blank, its data is lost
+  bs=n     block size in bytes, default 512, with K and M suffixes
+  count=n  number of blocks to copy
+  skip=n   blocks to skip in the input
+  seek=n   blocks to skip in the output
 ]]
 
 local SIZES = {[""] = 1, K = 1024, M = 1024 * 1024}
@@ -49,14 +50,20 @@ local function fail(path, reason)
   return 1
 end
 local input, output = shell.resolve(operands["if"]), shell.resolve(operands.of)
-if input == output then
+local source, sourceReason = medium.find(input, true)
+local target, targetReason = medium.find(output, true)
+if input == output or (source and target and source.index == target.index) then
   return fail(output, "Input and output are the same file")
 end
-local source, target = medium.find(input, true), medium.find(output)
+if not source and input:find("^/dev/vd") then
+  return fail(input, sourceReason)
+elseif not target and output:find("^/dev/vd") then
+  return fail(output, targetReason)
+end
 if (source or target) and bs % 512 ~= 0 then
   return fail(source and input or output, "Block size must be a multiple of 512 for a medium")
 end
-if output == "/" then
+if output == "/" or (target and target.path == "/") then
   return fail(output, "Is the boot medium")
 end
 if target then
@@ -73,7 +80,7 @@ else
   reader, reason = io.open(input, "rb")
 end
 if not reader then
-  return fail(source and input, reason) -- io.open's reasons name the path
+  return fail(source and input, reason)
 end
 local from <close> = reader
 if skip > 0 then
@@ -115,7 +122,7 @@ while not count or blocks < count do
     break
   end
   if target and #data % 512 ~= 0 then
-    data = data .. string.rep("\0", 512 - #data % 512) -- the last block of a file, to whole sectors
+    data = data .. string.rep("\0", 512 - #data % 512)
   end
   local ok, writeReason = to:write(data)
   if not ok then

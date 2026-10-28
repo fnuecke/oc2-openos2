@@ -10,15 +10,14 @@ local system = require("system")
 local pipe = {}
 
 local CAPACITY = 4096
-local BROKEN = {exit = 141} -- like SIGPIPE: the writer ends silently when the reader is gone
+local BROKEN = {exit = 141}
 local BLOCKED = system.BLOCKED
 
-local transfers = 0 -- counts reads, writes and closes, so the scheduler sees whether stages got on
+local transfers = 0
 
 local Reader, Writer = {}, {}
 Reader.__index, Writer.__index = Reader, Writer
 
--- A connected reader and writer. The unread data is data from offset on, then the strings in queue.
 function pipe.create()
   local state = {data = "", offset = 1, queue = {}, queued = 0, writerClosed = false, readerClosed = false}
   return setmetatable({pipe = state}, Reader), setmetatable({pipe = state}, Writer)
@@ -218,7 +217,6 @@ function pipe.run(commands)
         return
       end
       if transfers == before and coroutine.isyieldable() then
-        -- No stage got on: wait further out, and give what comes back to the waiting stages.
         waiting = waiting or {BLOCKED, n = 1}
         local resumed = table.pack(coroutine.yield(table.unpack(waiting, 1, waiting.n)))
         for _, stage in ipairs(stages) do

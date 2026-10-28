@@ -4,8 +4,7 @@ local term = require("term")
 
 local USAGE = [[
 Usage: sh [script]
-Runs the commands in the script, one per line, or reads commands from the
-terminal.
+Runs a script, or reads commands from the terminal.
 ]]
 
 local script = ...
@@ -53,7 +52,7 @@ while true do
     shell.restore(depth, input, output, errors)
     local pwd = os.getenv("PWD")
     if not pwd or not fs.exists(pwd) then
-      os.setenv("PWD", "/") -- e.g. the medium was removed
+      os.setenv("PWD", "/")
     end
     if term.column() > 0 then
       term.write("\n")
@@ -71,7 +70,7 @@ while true do
     if type(err) == "table" and err.exit ~= nil then
       return err.exit
     elseif term.powerRequest(err) then
-      error(err, 0) -- up to /init.lua
+      error(err, 0)
     elseif term.systemError(err) ~= "interrupt" then
       io.stderr:write(tostring(err), "\n")
     end

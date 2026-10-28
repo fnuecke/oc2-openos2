@@ -1,7 +1,3 @@
--- Runs the commands of $HOME/.crontab at their times, in a background thread. The lines have the
--- standard five fields, minute hour day month weekday, with *, lists, ranges and steps, then the
--- command. @reboot runs a command when cron starts at boot. Times are UTC, from os.time. Each job
--- runs in a thread of its own, and its output is dropped, as on Linux without mail.
 -- CRON_MINUTE_SECONDS sets the length of a minute, for tests.
 
 local shell = require("shell")

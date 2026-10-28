@@ -2,8 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: yes [string...]
-Prints "y", or the strings, on a line over and over, until the reader of a pipe
-goes away or Ctrl+C.
+Prints "y", or the strings, over and over.
 ]]
 
 local args, options = shell.parse(...)

@@ -1,8 +1,6 @@
 local USAGE = [[
 Usage: stty -F <device> [speed] [setting...]
-Prints or sets the speed of a serial port, e.g. stty -F /dev/ttyS1 115200.
-Ports are always raw, so raw, -echo, -crtscts and similar settings are
-accepted and change nothing.
+Prints or sets the speed of a serial port.
 ]]
 
 local IGNORED = {

@@ -1,8 +1,8 @@
 local shell = require("shell")
 local USAGE = [[
 Usage: mkdir [-p] <directory>...
-Creates directories. -p also creates missing parents, and is fine with existing
-ones.
+Creates directories.
+  -p  create missing parents, allow existing directories
 ]]
 
 local args, options = shell.parse(...)

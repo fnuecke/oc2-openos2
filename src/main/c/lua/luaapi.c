@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /* Lua state setup and the kernel's Lua modules: console, computer, fs, and minimal io and os. */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "drivers/console.h"
@@ -45,15 +46,6 @@ static int ok_or_fail(lua_State *L, const int code) {
     }
     lua_pushboolean(L, 1);
     return 1;
-}
-
-/* Saturates, so that adding the result to the current time cannot wrap. */
-static u64 seconds_to_ticks(const lua_Number seconds) {
-    const lua_Number ticks = seconds * (lua_Number) time_frequency();
-    if (!(ticks > 0)) {
-        return 0;
-    }
-    return ticks >= 0x1p62 ? 1ull << 62 : (u64) ticks;
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -123,7 +115,7 @@ static int l_reboot(lua_State *L) {
     reboot();
 }
 
-/* Returns the deepest stack use since boot and the stack size, in bytes. */
+/* computer.stack() -> the deepest stack use since boot and the stack size, in bytes */
 static int l_stack(lua_State *L) {
     size_t peak, size;
     stack_usage(&peak, &size);
@@ -157,6 +149,11 @@ static const luaL_Reg computer_lib[] = {
 /* ---------------------------------------------------------------------------------------- */
 /* fs */
 
+/*
+ * fs.info, fs.format, fs.label, fs.mount, fs.unmount and fs.openRaw accept a disk in /dev, like
+ * /dev/vda, for the path it is mounted at.
+ */
+
 #define LISTING_META "openos2.listing"
 
 /* Owns the backend's buffer, so it is freed even when pushing the names raises an error. */
@@ -167,9 +164,8 @@ static int l_listing_gc(lua_State *L) {
     return 0;
 }
 
-/* Directories end in "/". The names are collected first, no Lua code runs during the listing. */
-static int l_fs_list(lua_State *L) {
-    const char *path = opt_path(L, 1, "/");
+/* Also used by posix.dirent. */
+struct fs_listing *push_listing(lua_State *L) {
     struct fs_listing *listing = lua_newuserdatauv(L, sizeof(struct fs_listing), 0);
     memset(listing, 0, sizeof(*listing));
     if (luaL_newmetatable(L, LISTING_META)) {
@@ -177,6 +173,13 @@ static int l_fs_list(lua_State *L) {
         lua_setfield(L, -2, "__gc");
     }
     lua_setmetatable(L, -2);
+    return listing;
+}
+
+/* fs.list([path]) -> names; directories end in "/" */
+static int l_fs_list(lua_State *L) {
+    const char *path = opt_path(L, 1, "/");
+    struct fs_listing *listing = push_listing(L);
     const int result = fs_list(path, listing);
     if (result < 0) {
         return fail(L, result);
@@ -194,6 +197,7 @@ static int l_fs_list(lua_State *L) {
     return 1;
 }
 
+/* fs.stat(path) -> {size, isDir, mtime}, plus isDevice = true for devices in /dev */
 static int l_fs_stat(lua_State *L) {
     struct fs_stat st;
     const int result = fs_stat(check_path(L, 1), &st);
@@ -205,6 +209,10 @@ static int l_fs_stat(lua_State *L) {
     lua_setfield(L, -2, "size");
     lua_pushboolean(L, st.is_dir);
     lua_setfield(L, -2, "isDir");
+    if (st.is_device) {
+        lua_pushboolean(L, 1);
+        lua_setfield(L, -2, "isDevice");
+    }
     lua_pushinteger(L, st.mtime);
     lua_setfield(L, -2, "mtime");
     return 1;
@@ -228,6 +236,7 @@ static int l_fs_rename(lua_State *L) {
     return ok_or_fail(L, fs_rename(check_path(L, 1), check_path(L, 2)));
 }
 
+/* fs.info([path]) -> total, free: the size of the medium at path, in bytes */
 static int l_fs_info(lua_State *L) {
     u64 total, free;
     const int result = fs_info(opt_path(L, 1, "/"), &total, &free);
@@ -241,7 +250,10 @@ static int l_fs_info(lua_State *L) {
 
 static void mount_entry(void *ctx, const struct fs_mount *mount) {
     lua_State *L = ctx;
-    lua_createtable(L, 0, 8);
+    if (mount->unmounted && !lua_toboolean(L, 1)) {
+        return;
+    }
+    lua_createtable(L, 0, 9);
     lua_pushstring(L, mount->path);
     lua_setfield(L, -2, "path");
     if (mount->index >= 0) {
@@ -265,10 +277,16 @@ static void mount_entry(void *ctx, const struct fs_mount *mount) {
         lua_pushinteger(L, mount->serial);
         lua_setfield(L, -2, "serial");
     }
+    if (mount->unmounted) {
+        lua_pushboolean(L, 1);
+        lua_setfield(L, -2, "unmounted");
+    }
     lua_rawseti(L, -2, (lua_Integer) lua_rawlen(L, -2) + 1);
 }
 
+/* fs.mounts([all]) -> mounts; with all, also drives detached by fs.unmount, with unmounted = true */
 static int l_fs_mounts(lua_State *L) {
+    lua_settop(L, 1);
     lua_newtable(L);
     fs_mounts(mount_entry, L);
     return 1;
@@ -309,6 +327,11 @@ static int l_fs_unmount(lua_State *L) {
     return ok_or_fail(L, fs_unmount(check_path(L, 1), opt_serial(L, 2)));
 }
 
+/* fs.mount(path) attaches a drive detached by fs.unmount, see fs_mount */
+static int l_fs_mount(lua_State *L) {
+    return ok_or_fail(L, fs_mount(check_path(L, 1)));
+}
+
 /* fs.label(path [, label [, serial]]) -> the label, "" if none; with a label, sets it. */
 static int l_fs_label(lua_State *L) {
     const char *path = check_path(L, 1);
@@ -343,6 +366,7 @@ static const luaL_Reg fs_lib[] = {
     {"format", l_fs_format},
     {"label", l_fs_label},
     {"unmount", l_fs_unmount},
+    {"mount", l_fs_mount},
     {"openRaw", l_fs_open_raw},
     {NULL, NULL},
 };
@@ -396,7 +420,7 @@ static int read_line(lua_State *L, const struct lfile *f, const int keep_newline
         if (newline != NULL) {
             const long used = newline - chunk + 1;
             luaL_addlstring(&b, chunk, (size_t) (keep_newline ? used : used - 1));
-            fs_seek(f->fd, used - count, 1);
+            fs_seek(f->fd, used - count, SEEK_CUR);
             break;
         }
         luaL_addlstring(&b, chunk, (size_t) count);
@@ -423,7 +447,7 @@ static int read_bytes(lua_State *L, const struct lfile *f, size_t count, const i
         if (got == 0) {
             luaL_pushfail(L);
         } else {
-            fs_seek(f->fd, -1, 1);
+            fs_seek(f->fd, -1, SEEK_CUR);
             lua_pushliteral(L, "");
         }
         return 1;
@@ -741,44 +765,6 @@ static int open_io(lua_State *L) {
 /* ---------------------------------------------------------------------------------------- */
 /* os */
 
-/* days_from_civil and civil_from_time follow Howard Hinnant's public domain date algorithms. */
-static long days_from_civil(long y, const long m, const long d) {
-    y -= m <= 2;
-    const long era = (y >= 0 ? y : y - 399) / 400;
-    const long yoe = y - era * 400;
-    const long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    const long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
-
-struct date {
-    long year, month, day, hour, min, sec, wday, yday;
-};
-
-static void civil_from_time(const long t, struct date *out) {
-    long days = t / 86400;
-    long rest = t % 86400;
-    if (rest < 0) {
-        rest += 86400;
-        days--;
-    }
-    out->hour = rest / 3600;
-    out->min = rest / 60 % 60;
-    out->sec = rest % 60;
-    out->wday = ((days % 7) + 11) % 7 + 1; /* 1970-01-01 was a Thursday; Sunday is 1 */
-
-    const long z = days + 719468;
-    const long era = (z >= 0 ? z : z - 146096) / 146097;
-    const long doe = z - era * 146097;
-    const long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    const long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const long mp = (5 * doy + 2) / 153;
-    out->day = doy - (153 * mp + 2) / 5 + 1;
-    out->month = mp < 10 ? mp + 3 : mp - 9;
-    out->year = yoe + era * 400 + (out->month <= 2);
-    out->yday = days - days_from_civil(out->year, 1, 1) + 1;
-}
-
 static long get_field(lua_State *L, const char *key, const long fallback) {
     const int type = lua_getfield(L, 1, key);
     long value = fallback;
@@ -900,12 +886,7 @@ static int l_os_exit(lua_State *L) {
     power_off();
 }
 
-/*
- * os.execute(command) only knows "stty", which oc2's serial library runs to set a serial port up:
- * a number sets the baud rate of the port after -F, raw mode and no echo are how the ports always
- * work, and other words are ignored. Returns like Lua's os.execute, other commands exit with 127.
- */
-/* There is no shell in the kernel: like Lua built without one. /init.lua runs commands. */
+/* There is no shell in the kernel, like Lua built without one. */
 static int l_os_execute(lua_State *L) {
     if (lua_isnoneornil(L, 1)) {
         lua_pushboolean(L, 0);
@@ -934,7 +915,10 @@ static const luaL_Reg os_lib[] = {
 /* ---------------------------------------------------------------------------------------- */
 /* ports: named virtio-console ports, opened through posix.fcntl as /dev/<name> */
 
-/* Returns whether a port with this name exists, waiting up to the timeout for the handshake. */
+/*
+ * ports.find(name [, timeout]) -> whether a port with this name exists, waiting up to timeout
+ * seconds for the handshake
+ */
 static int l_ports_find(lua_State *L) {
     const char *name = luaL_checkstring(L, 1);
     const u64 deadline = time_now() + seconds_to_ticks(luaL_optnumber(L, 2, PORT_OPEN_TIMEOUT));

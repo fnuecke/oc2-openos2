@@ -9,17 +9,14 @@
 #include "internal.h"
 #include "p9.h"
 
-#define SUPERBLOCK_OFFSET 1024
 #define MAX_BLOCK_SIZE 4096
-#define SECTOR_SIZE 512
 
 #define COMPAT_DIR_INDEX 0x20
 #define RO_COMPAT_LARGE_FILE 0x2
 
-#define S_IFMT 0xF000
-#define S_IFDIR 0x4000
-#define S_IFREG 0x8000
-#define S_IFLNK 0xA000
+#define EXT2_S_IFMT 0xF000
+#define EXT2_S_IFREG 0x8000
+#define EXT2_S_IFLNK 0xA000
 #define FAST_SYMLINK_MAX 60
 #define FT_REG 1
 #define INODE_INDEX_FL 0x1000
@@ -29,9 +26,6 @@
 #define STATE_ERROR 2
 
 #define CACHE_SIZE 12
-#define MAX_FILES 16
-#define MAX_RAW 2
-#define HEAD_SIZE (16 * 1024)
 #define FLOPPY_FILL 0xE5
 #define RAW_CHUNK 0x10000
 #define MAX_PATH_DEPTH 64
@@ -135,12 +129,13 @@ struct file {
 
 struct mount {
     struct vblk *dev;
-    int device; /* index of dev, see vblk_get */
-    char path[6 + FS_LABEL_LENGTH]; /* "/", "/mnt/<label>" or "/mnt/<device>" */
+    int device;
+    char path[EXT2_PATH_LENGTH];
     int medium; /* FS_MEDIUM_*, for any but ext2 only dev, device, path, writable, disk_* are set */
     u32 serial;
     int raw_readers; /* see fs_open_raw: nothing may be written meanwhile */
     int detached; /* open for a raw write, see fs_open_raw */
+    int unmounted; /* see park: no buffers, the path is /mnt/<device> */
     int writable;
     int filetype;
     u32 block_size;
@@ -157,11 +152,11 @@ struct mount {
     } super;
     int super_dirty;
     u8 disk_super[1024]; /* the superblock as last read from or written to the medium */
-    u64 disk_head; /* a hash of the first HEAD_SIZE bytes, for media that are not ext2, see is_same_medium */
+    u64 disk_head; /* a hash of the first EXT2_HEAD_SIZE bytes, for media that are not ext2, see is_same_medium */
     int gone; /* the medium was replaced, nothing more is written */
-    u64 nonce; /* random per read-write mount, see stamp */
-    u32 flushes; /* superblock writes since the mount */
-    int wrote; /* something was written during the current call */
+    u64 nonce;
+    u32 flushes;
+    int wrote;
     struct group_desc *gdt;
     u8 *gdt_dirty; /* per descriptor table block */
     struct buf cache[CACHE_SIZE];
@@ -172,13 +167,13 @@ static struct mount *fs;
 static struct mount *mounts[MAX_VIRTIO];
 static struct mount *root;
 static int boot_device = -1;
-static struct file files[MAX_FILES];
+static struct file files[EXT2_MAX_FILES];
 static struct raw {
     int open;
     int write;
     u64 pos;
     struct mount *mount; /* NULL once its medium was changed */
-} raws[MAX_RAW];
+} raws[EXT2_RAW_HANDLES];
 static u32 serials;
 
 #define SB (&fs->super.sb)
@@ -195,15 +190,15 @@ static void drop_cache(void) {
 }
 
 static int read_head(struct vblk *dev, u64 *hash, bool *blank) {
-    const u64 capacity = vblk_capacity(dev) * SECTOR_SIZE;
-    const u64 size = capacity < HEAD_SIZE ? capacity : HEAD_SIZE;
+    const u64 capacity = vblk_capacity(dev) * VBLK_SECTOR_SIZE;
+    const u64 size = capacity < EXT2_HEAD_SIZE ? capacity : EXT2_HEAD_SIZE;
     u8 raw[1024];
     u64 value = 0xCBF29CE484222325ull;
     int uniform = 1;
     u8 first = 0;
     for (u64 at = 0; at < size; at += sizeof(raw)) {
         const u32 len = size - at < sizeof(raw) ? (u32) (size - at) : (u32) sizeof(raw);
-        const int result = vblk_read(dev, at / SECTOR_SIZE, raw, len);
+        const int result = vblk_read(dev, at / VBLK_SECTOR_SIZE, raw, len);
         if (result != 0) {
             return result;
         }
@@ -225,7 +220,7 @@ static bool is_same_medium(void) {
             return 0;
         }
         u8 raw[1024];
-        int result = vblk_read(fs->dev, SUPERBLOCK_OFFSET / SECTOR_SIZE, raw, sizeof(raw));
+        int result = vblk_read(fs->dev, EXT2_SUPERBLOCK_OFFSET / VBLK_SECTOR_SIZE, raw, sizeof(raw));
         if (result == 0 && memcmp(raw, fs->disk_super, sizeof(raw)) != 0) {
             return 0;
         }
@@ -360,7 +355,8 @@ static int flush_metadata(void) {
         memset(fs->super.raw + LAST_MOUNTED_OFFSET, 0, LAST_MOUNTED_SIZE);
         snprintf((char *) fs->super.raw + LAST_MOUNTED_OFFSET, LAST_MOUNTED_SIZE, "openos2 %016lx %08x",
             fs->nonce, ++fs->flushes);
-        const int written = transfer(1, SUPERBLOCK_OFFSET / SECTOR_SIZE, fs->super.raw, sizeof(fs->super.raw));
+        const int written =
+            transfer(1, EXT2_SUPERBLOCK_OFFSET / VBLK_SECTOR_SIZE, fs->super.raw, sizeof(fs->super.raw));
         if (written == 0) {
             fs->super_dirty = 0;
             memcpy(fs->disk_super, fs->super.raw, sizeof(fs->disk_super));
@@ -553,7 +549,7 @@ static int alloc_inode(const u32 parent, const int is_dir, struct inode *inode) 
 }
 
 static void free_inode(struct inode *inode) {
-    const int is_dir = (inode->d.mode & S_IFMT) == S_IFDIR;
+    const int is_dir = (inode->d.mode & EXT2_S_IFMT) == EXT2_S_IFDIR;
     inode->d.dtime = (u32) rtc_seconds();
     inode->d.links_count = 0;
     if (write_inode(inode) != 0) {
@@ -613,7 +609,7 @@ static u32 bmap(struct inode *inode, u32 index, const int allocate, int *error, 
             return 0;
         }
         *slot = block;
-        inode->d.blocks += fs->sectors_per_block;
+        inode->d.blocks += fs->block_size / EXT2_I_BLOCK_SIZE;
         if (levels == 0 && fresh != NULL) {
             *fresh = 1;
         }
@@ -640,7 +636,7 @@ static u32 bmap(struct inode *inode, u32 index, const int allocate, int *error, 
                 return 0;
             }
             entries[entry] = next;
-            inode->d.blocks += fs->sectors_per_block;
+            inode->d.blocks += fs->block_size / EXT2_I_BLOCK_SIZE;
             if (level == 1 && fresh != NULL) {
                 *fresh = 1;
             }
@@ -678,7 +674,7 @@ static void free_tree(struct inode *inode, const u32 block, const int level) {
         }
     }
     free_block(block);
-    inode->d.blocks -= fs->sectors_per_block;
+    inode->d.blocks -= fs->block_size / EXT2_I_BLOCK_SIZE;
 }
 
 static bool has_blocks(const struct inode *inode);
@@ -688,7 +684,7 @@ static int truncate(struct inode *inode) {
     memset(inode->d.block, 0, sizeof(inode->d.block));
     inode->d.size = 0;
     inode->d.size_high = 0;
-    inode->d.blocks = inode->d.file_acl != 0 ? fs->sectors_per_block : 0;
+    inode->d.blocks = inode->d.file_acl != 0 ? fs->block_size / EXT2_I_BLOCK_SIZE : 0;
     const int result = write_inode(inode);
     if (result != 0) {
         *inode = old;
@@ -730,12 +726,12 @@ static u32 block_count(const struct inode *inode) {
 }
 
 static bool is_dir(const struct inode *inode) {
-    return (inode->d.mode & S_IFMT) == S_IFDIR;
+    return (inode->d.mode & EXT2_S_IFMT) == EXT2_S_IFDIR;
 }
 
 static bool has_blocks(const struct inode *inode) {
-    const u32 type = inode->d.mode & S_IFMT;
-    return type == S_IFREG || type == S_IFDIR || (type == S_IFLNK && inode->d.size >= FAST_SYMLINK_MAX);
+    const u32 type = inode->d.mode & EXT2_S_IFMT;
+    return type == EXT2_S_IFREG || type == EXT2_S_IFDIR || (type == EXT2_S_IFLNK && inode->d.size >= FAST_SYMLINK_MAX);
 }
 
 static int dir_find(struct inode *dir, const char *name, const u32 len, struct location *loc) {
@@ -1022,12 +1018,12 @@ static void free_buffers(struct mount *m) {
 }
 
 static void unmount(struct mount *m) {
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 0; i < EXT2_MAX_FILES; i++) {
         if (files[i].open && files[i].mount == m) {
             files[i].mount = NULL;
         }
     }
-    for (int i = 0; i < MAX_RAW; i++) {
+    for (int i = 0; i < EXT2_RAW_HANDLES; i++) {
         if (raws[i].open && raws[i].mount == m) {
             raws[i].mount = NULL;
         }
@@ -1083,7 +1079,7 @@ static int read_mount(struct vblk *dev) {
     if (vblk_capacity(dev) == 0) {
         return FS_NOT_FOUND;
     }
-    if (transfer(0, SUPERBLOCK_OFFSET / SECTOR_SIZE, fs->super.raw, sizeof(fs->super.raw)) != 0) {
+    if (transfer(0, EXT2_SUPERBLOCK_OFFSET / VBLK_SECTOR_SIZE, fs->super.raw, sizeof(fs->super.raw)) != 0) {
         return FS_IO;
     }
     memcpy(fs->disk_super, fs->super.raw, sizeof(fs->disk_super));
@@ -1100,7 +1096,7 @@ static int read_mount(struct vblk *dev) {
     fs->filetype = (incompat & INCOMPAT_FILETYPE) != 0;
 
     fs->block_size = 1024u << SB->log_block_size;
-    fs->sectors_per_block = fs->block_size / SECTOR_SIZE;
+    fs->sectors_per_block = fs->block_size / VBLK_SECTOR_SIZE;
     fs->pointers_per_block = fs->block_size / 4;
     fs->inode_size = SB->rev_level >= 1 ? SB->inode_size : 128;
     fs->first_ino = SB->rev_level >= 1 ? SB->first_ino : 11;
@@ -1165,7 +1161,7 @@ static void read_label(const struct mount *m, char *label) {
 }
 
 static bool is_name_taken(const char *name, struct mount *self) {
-    char path[6 + FS_LABEL_LENGTH];
+    char path[EXT2_PATH_LENGTH];
     snprintf(path, sizeof(path), "/mnt/%s", name);
     const char *rest;
     if (p9_resolve(path, &rest) != NULL && *rest == 0) {
@@ -1198,6 +1194,13 @@ static void name_mount(struct mount *m) {
     }
 }
 
+/* Keeps a detached drive for raw access, see fs_unmount. */
+static void park(struct mount *m) {
+    free_buffers(m);
+    m->unmounted = 1;
+    snprintf(m->path, sizeof(m->path), "/mnt/%d", m->device);
+}
+
 static int read_unusable(struct mount *m) {
     free_buffers(m);
     m->writable = !vblk_read_only(m->dev);
@@ -1211,7 +1214,7 @@ static int read_unusable(struct mount *m) {
     return 0;
 }
 
-static struct mount *mount_device(const int device) {
+static struct mount *mount_device(const int device, const bool attach) {
     struct mount *m = calloc(1, sizeof(struct mount));
     if (m == NULL) {
         return NULL;
@@ -1223,14 +1226,18 @@ static struct mount *mount_device(const int device) {
     int result = read_mount(vblk_get(device));
     if (result == FS_INVALID) {
         result = read_unusable(m);
-    } else if (result == 0 && m->writable) {
+    } else if (result == 0 && m->writable && attach) {
         result = stamp();
     }
     if (result != 0) {
         unmount(m);
         return NULL;
     }
-    name_mount(m);
+    if (attach) {
+        name_mount(m);
+    } else {
+        park(m);
+    }
     return m;
 }
 
@@ -1246,7 +1253,7 @@ static void make_root(struct mount *m) {
 
 void ext2_mount_all(void) {
     for (int i = 0; i < vblk_count(); i++) {
-        struct mount *m = mount_device(i);
+        struct mount *m = mount_device(i, 1);
         if (m != NULL && boot_device < 0 && has_boot_image()) {
             boot_device = i;
             make_root(m);
@@ -1266,7 +1273,7 @@ static int mark_clean(void) {
 void ext2_unmount_all(void) {
     for (int i = 0; i < vblk_count(); i++) {
         fs = mounts[i];
-        if (fs != NULL) {
+        if (fs != NULL && !fs->unmounted) {
             mark_clean();
         }
     }
@@ -1284,6 +1291,9 @@ int ext2_unmount(const char *path, const u32 serial) {
     if (fs == root) {
         return FS_IS_ROOT;
     }
+    if (fs->unmounted) {
+        return FS_INVALID;
+    }
     if (has_open_files(fs) || fs->raw_readers > 0 || fs->detached) {
         return FS_BUSY;
     }
@@ -1293,21 +1303,36 @@ int ext2_unmount(const char *path, const u32 serial) {
     }
     char old_path[sizeof(fs->path)];
     strcpy(old_path, fs->path);
-    const int device = fs->device;
-    unmount(fs);
-    report(old_path, device);
+    park(fs);
+    report(old_path, fs->device);
     return 0;
 }
 
 static void remount(const int device) {
-    struct mount *m = mount_device(device);
+    struct mount *m = mount_device(device, 1);
     if (m != NULL && device == boot_device && has_boot_image()) {
         make_root(m);
     }
 }
 
+int ext2_mount(const char *path) {
+    const int result = enter_mount_point(path, 0);
+    if (result != 0) {
+        return result;
+    }
+    if (!fs->unmounted || fs->raw_readers > 0 || fs->detached) {
+        return FS_BUSY;
+    }
+    const int device = fs->device;
+    unmount(fs);
+    remount(device);
+    report("", device);
+    return mounts[device] != NULL ? 0 : FS_IO;
+}
+
 static void report(const char *old_path, const int device) {
-    const char *new_path = mounts[device] != NULL ? mounts[device]->path : NULL;
+    const struct mount *m = mounts[device];
+    const char *new_path = m != NULL && !m->unmounted ? m->path : NULL;
     if (old_path[0] != 0 && new_path != NULL && strcmp(old_path, new_path) == 0) {
         fs_medium_event(new_path, "changed");
     } else {
@@ -1332,7 +1357,12 @@ static void check_media(void) {
         if (m == NULL && !vblk_change_pending(dev)) {
             continue;
         }
-        if (m != NULL && !m->gone) {
+        if (m != NULL && !m->gone && m->unmounted) {
+            fs = m;
+            if (is_same_medium()) {
+                continue;
+            }
+        } else if (m != NULL && !m->gone) {
             fs = m;
             int dirty = fs->super_dirty;
             for (u32 j = 0; j < fs->gdt_blocks; j++) {
@@ -1351,7 +1381,9 @@ static void check_media(void) {
         changed[i] = 1;
         old_paths[i][0] = 0;
         if (m != NULL) {
-            strcpy(old_paths[i], m->path);
+            if (!m->unmounted) {
+                strcpy(old_paths[i], m->path);
+            }
             unmount(m);
         }
     }
@@ -1377,21 +1409,31 @@ void ext2_mounts(const fs_mounts_fn fn, void *ctx) {
         char label[FS_LABEL_LENGTH + 1];
         read_label(m, label);
         struct fs_mount mount = {.path = m->path, .label = label, .index = i, .medium = m->medium, .serial = m->serial,
-            .writable = m->writable};
+            .writable = m->writable, .unmounted = m->unmounted};
         if (m->medium == FS_MEDIUM_EXT2) {
             mount.total = (u64) m->super.sb.blocks_count * m->block_size;
             mount.free = (u64) m->super.sb.free_blocks_count * m->block_size;
         } else {
-            mount.total = vblk_capacity(m->dev) * SECTOR_SIZE;
+            mount.total = vblk_capacity(m->dev) * VBLK_SECTOR_SIZE;
         }
         fn(ctx, &mount);
     }
 }
 
+bool ext2_mount_path(const int device, char *path, u32 *serial) {
+    check_media();
+    if (mounts[device] == NULL) {
+        return 0;
+    }
+    strcpy(path, mounts[device]->path);
+    *serial = mounts[device]->serial;
+    return 1;
+}
+
 void ext2_mount_names(struct fs_listing *out) {
     check_media();
     for (int i = 0; i < vblk_count(); i++) {
-        if (mounts[i] != NULL && mounts[i] != root) {
+        if (mounts[i] != NULL && mounts[i] != root && !mounts[i]->unmounted) {
             const char *name = mounts[i]->path + 5;
             fs_listing_add_unique(out, name, strlen(name), 1);
         }
@@ -1442,7 +1484,7 @@ static const char *enter(const char *path) {
 }
 
 static int unusable(void) {
-    if (fs == NULL) {
+    if (fs == NULL || fs->unmounted) {
         return FS_NOT_FOUND;
     }
     if (fs->detached) {
@@ -1604,7 +1646,7 @@ static int create(const char *path, const int dir, struct inode *out) {
         return result;
     }
     if (dir) {
-        inode.d.mode = S_IFDIR | 0755;
+        inode.d.mode = EXT2_S_IFDIR | 0755;
         inode.d.links_count = 2;
         int error = 0;
         const u32 block = bmap(&inode, 0, 1, &error, NULL);
@@ -1626,7 +1668,7 @@ static int create(const char *path, const int dir, struct inode *out) {
         }
         inode.d.size = fs->block_size;
     } else {
-        inode.d.mode = S_IFREG | 0644;
+        inode.d.mode = EXT2_S_IFREG | 0644;
         inode.d.links_count = 1;
     }
     result = write_inode(&inode);
@@ -1648,7 +1690,7 @@ static int create(const char *path, const int dir, struct inode *out) {
 
 static int open_file(const char *path, const int flags) {
     int fd = -1;
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 0; i < EXT2_MAX_FILES; i++) {
         if (!files[i].open) {
             fd = i;
             break;
@@ -1671,7 +1713,7 @@ static int open_file(const char *path, const int flags) {
         result = create(path, 0, &inode);
     } else if (result == 0 && is_dir(&inode)) {
         result = FS_IS_DIR;
-    } else if (result == 0 && (inode.d.mode & S_IFMT) != S_IFREG) {
+    } else if (result == 0 && (inode.d.mode & EXT2_S_IFMT) != EXT2_S_IFREG) {
         result = FS_INVALID;
     } else if (result == 0 && (flags & O_TRUNCATE) && (flags & O_WRITE)) {
         result = truncate(&inode);
@@ -1702,7 +1744,7 @@ ext2_fd ext2_open(const char *path, const int flags) {
 }
 
 static bool has_open_files(const struct mount *m) {
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 0; i < EXT2_MAX_FILES; i++) {
         if (files[i].open && files[i].mount == m) {
             return 1;
         }
@@ -1719,10 +1761,10 @@ ext2_raw_fd ext2_open_raw(const char *path, const int flags, const bool force, c
         return FS_BUSY;
     }
     int fd = 0;
-    while (fd < MAX_RAW && raws[fd].open) {
+    while (fd < EXT2_RAW_HANDLES && raws[fd].open) {
         fd++;
     }
-    if (fd == MAX_RAW) {
+    if (fd == EXT2_RAW_HANDLES) {
         return FS_TOO_MANY;
     }
     const int write = (flags & O_WRITE) != 0;
@@ -1741,7 +1783,7 @@ ext2_raw_fd ext2_open_raw(const char *path, const int flags, const bool force, c
         }
         fs->detached = 1;
     } else {
-        for (int i = 0; i < MAX_FILES; i++) {
+        for (int i = 0; i < EXT2_MAX_FILES; i++) {
             if (files[i].open && files[i].mount == fs && (files[i].flags & O_WRITE)) {
                 return FS_BUSY;
             }
@@ -1765,7 +1807,7 @@ int ext2_mkdir(const char *path) {
 }
 
 static bool is_open(const u32 inode) {
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 0; i < EXT2_MAX_FILES; i++) {
         if (files[i].open && files[i].mount == fs && files[i].inode == inode) {
             return 1;
         }
@@ -1973,7 +2015,9 @@ int ext2_remove(const char *path) {
 static void replace(const int device) {
     char old_path[sizeof(mounts[0]->path)] = "";
     if (mounts[device] != NULL) {
-        strcpy(old_path, mounts[device]->path);
+        if (!mounts[device]->unmounted) {
+            strcpy(old_path, mounts[device]->path);
+        }
         unmount(mounts[device]);
     }
     remount(device);
@@ -2058,7 +2102,7 @@ int ext2_set_label(const char *path, const char *label, const u32 serial) {
 
 static int enter_file(const int fd, struct file **out) {
     check_media();
-    if (fd < 0 || fd >= MAX_FILES || !files[fd].open) {
+    if (fd < 0 || fd >= EXT2_MAX_FILES || !files[fd].open) {
         return FS_INVALID;
     }
     if (files[fd].mount == NULL) {
@@ -2191,9 +2235,9 @@ long ext2_seek(const ext2_fd fd, const long offset, const int whence) {
         return entered;
     }
     long base = 0;
-    if (whence == 1) {
+    if (whence == SEEK_CUR) {
         base = (long) file->pos;
-    } else if (whence == 2) {
+    } else if (whence == SEEK_END) {
         struct inode inode;
         const int result = read_inode(file->inode, &inode);
         if (result != 0) {
@@ -2209,7 +2253,7 @@ long ext2_seek(const ext2_fd fd, const long offset, const int whence) {
 }
 
 int ext2_close(const ext2_fd fd) {
-    if (fd < 0 || fd >= MAX_FILES || !files[fd].open) {
+    if (fd < 0 || fd >= EXT2_MAX_FILES || !files[fd].open) {
         return FS_INVALID;
     }
     files[fd].open = 0;
@@ -2217,18 +2261,18 @@ int ext2_close(const ext2_fd fd) {
 }
 
 static long enter_raw(const int fd, const size_t len, struct raw **out) {
-    if (fd < 0 || fd >= MAX_RAW || !raws[fd].open) {
+    if (fd < 0 || fd >= EXT2_RAW_HANDLES || !raws[fd].open) {
         return FS_INVALID;
     }
     struct raw *raw = &raws[fd];
     if (raw->mount == NULL) {
         return FS_CHANGED;
     }
-    if ((raw->pos | len) % SECTOR_SIZE != 0) {
+    if ((raw->pos | len) % VBLK_SECTOR_SIZE != 0) {
         return FS_INVALID;
     }
     fs = raw->mount;
-    const u64 capacity = vblk_capacity(fs->dev) * SECTOR_SIZE;
+    const u64 capacity = vblk_capacity(fs->dev) * VBLK_SECTOR_SIZE;
     *out = raw;
     return raw->pos >= capacity ? 0 : (long) (len < capacity - raw->pos ? len : capacity - raw->pos);
 }
@@ -2241,7 +2285,7 @@ static long raw_transfer(const int write, const int fd, void *data, const size_t
     }
     for (long done = 0; done < count;) {
         const u32 chunk = count - done < RAW_CHUNK ? (u32) (count - done) : RAW_CHUNK;
-        const int result = transfer(write, raw->pos / SECTOR_SIZE, (u8 *) data + done, chunk);
+        const int result = transfer(write, raw->pos / VBLK_SECTOR_SIZE, (u8 *) data + done, chunk);
         if (result != 0) {
             return done > 0 ? done : result;
         }
@@ -2256,7 +2300,7 @@ long ext2_raw_read(const ext2_raw_fd fd, void *dst, const size_t len) {
 }
 
 long ext2_raw_write(const ext2_raw_fd fd, const void *src, const size_t len) {
-    if (fd >= 0 && fd < MAX_RAW && raws[fd].open && !raws[fd].write) {
+    if (fd >= 0 && fd < EXT2_RAW_HANDLES && raws[fd].open && !raws[fd].write) {
         return FS_INVALID;
     }
     const long count = raw_transfer(1, fd, (void *) src, len);
@@ -2269,10 +2313,10 @@ long ext2_raw_seek(const ext2_raw_fd fd, const long offset, const int whence) {
     if (checked < 0) {
         return checked;
     }
-    const long capacity = (long) (vblk_capacity(fs->dev) * SECTOR_SIZE);
+    const long capacity = (long) (vblk_capacity(fs->dev) * VBLK_SECTOR_SIZE);
     const long base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? (long) raw->pos : capacity;
     const long pos = base + offset;
-    if (pos < 0 || pos % SECTOR_SIZE != 0) {
+    if (pos < 0 || pos % VBLK_SECTOR_SIZE != 0) {
         return FS_INVALID;
     }
     raw->pos = (u64) pos;
@@ -2280,7 +2324,7 @@ long ext2_raw_seek(const ext2_raw_fd fd, const long offset, const int whence) {
 }
 
 int ext2_raw_close(const ext2_raw_fd fd) {
-    if (fd < 0 || fd >= MAX_RAW || !raws[fd].open) {
+    if (fd < 0 || fd >= EXT2_RAW_HANDLES || !raws[fd].open) {
         return FS_INVALID;
     }
     struct raw *raw = &raws[fd];
@@ -2288,7 +2332,11 @@ int ext2_raw_close(const ext2_raw_fd fd) {
     if (raw->mount == NULL) {
         return 0;
     }
-    if (raw->write) {
+    if (raw->write && raw->mount->unmounted) {
+        const int device = raw->mount->device;
+        unmount(raw->mount);
+        mount_device(device, 0);
+    } else if (raw->write) {
         replace(raw->mount->device);
     } else {
         raw->mount->raw_readers--;

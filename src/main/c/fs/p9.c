@@ -5,6 +5,7 @@
  * writes the reply across them in order.
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,25 +56,16 @@
 #define DIR_BUFFER 1024
 #define QUEUE_SIZE 4
 #define MAX_MOUNTS 2
-#define MAX_FILES 8
 #define MAX_WALK 16
 #define TIMEOUT_SECONDS 10
 
-#define E_NOENT 2
-#define E_EXIST 17
-#define E_NOTDIR 20
-#define E_ISDIR 21
-#define E_NOSPC 28
-#define E_ROFS 30
-#define E_NOTEMPTY 39
-
 struct p9 {
     u64 base;
-    char path[48]; /* "/mnt/<tag>" */
+    char path[FS_MOUNT_PATH_LENGTH];
     int dead; /* a request timed out, its buffers may still be written */
     bool read_only;
     struct virtq queue;
-    u32 fids; /* bit set per fid in use, bit 0 is the root */
+    u32 fids;
     u8 tx[TX_SIZE];
     u8 rx[RX_SIZE];
 };
@@ -92,7 +84,7 @@ struct name {
 
 static struct p9 *mounts[MAX_MOUNTS];
 static int mount_count;
-static struct file files[MAX_FILES];
+static struct file files[P9_MAX_FILES];
 static u8 dir_buffer[DIR_BUFFER];
 
 /* ---------------------------------------------------------------------------------------- */
@@ -139,13 +131,13 @@ static u8 *begin(struct p9 *m, const u8 type) {
 
 static int map_errno(const u32 number) {
     switch (number) {
-        case E_NOENT: return FS_NOT_FOUND;
-        case E_EXIST: return FS_EXISTS;
-        case E_NOTDIR: return FS_NOT_DIR;
-        case E_ISDIR: return FS_IS_DIR;
-        case E_NOSPC: return FS_NO_SPACE;
-        case E_ROFS: return FS_READ_ONLY;
-        case E_NOTEMPTY: return FS_NOT_EMPTY;
+        case ENOENT: return FS_NOT_FOUND;
+        case EEXIST: return FS_EXISTS;
+        case ENOTDIR: return FS_NOT_DIR;
+        case EISDIR: return FS_IS_DIR;
+        case ENOSPC: return FS_NO_SPACE;
+        case EROFS: return FS_READ_ONLY;
+        case ENOTEMPTY: return FS_NOT_EMPTY;
         default: return FS_IO;
     }
 }
@@ -483,7 +475,7 @@ p9_fd p9_open(struct p9 *m, const char *path, const int flags) {
         return FS_READ_ONLY;
     }
     int fd = -1;
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (int i = 0; i < P9_MAX_FILES; i++) {
         if (files[i].mount == NULL) {
             fd = i;
             break;
@@ -613,7 +605,7 @@ int p9_remove(struct p9 *m, const char *path) {
 /* Open files */
 
 static struct file *get_file(const int fd) {
-    return fd >= 0 && fd < MAX_FILES && files[fd].mount != NULL ? &files[fd] : NULL;
+    return fd >= 0 && fd < P9_MAX_FILES && files[fd].mount != NULL ? &files[fd] : NULL;
 }
 
 long p9_read(const p9_fd fd, void *dst, const size_t len) {
@@ -682,8 +674,8 @@ long p9_seek(const p9_fd fd, const long offset, const int whence) {
     if (f == NULL) {
         return FS_INVALID;
     }
-    long base = whence == 1 ? (long) f->pos : 0;
-    if (whence == 2) {
+    long base = whence == SEEK_CUR ? (long) f->pos : 0;
+    if (whence == SEEK_END) {
             struct fs_stat st;
         const int result = getattr(f->mount, f->fid, &st);
         if (result != 0) {

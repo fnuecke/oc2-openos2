@@ -2,7 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: free
-Prints the heap: total, used, free, and how much of it Lua uses.
+Prints how much memory is used and free.
 ]]
 
 local _, options = shell.parse(...)

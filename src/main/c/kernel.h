@@ -30,7 +30,6 @@ typedef uint64_t u64;
 /* To be provided by the application running on top of the kernel. */
 void app_main(void);
 
-/* Callback signature for methods called from the trap handler. */
 typedef void (*interrupt_handler)(void);
 
 /* ---------------------------------------------------------------------------------------- */
@@ -46,6 +45,9 @@ static inline u64 time_now(void) {
 /* Ticks per second. */
 u64 time_frequency(void);
 
+/* Saturates, so that adding the result to the current time cannot wrap. NaN gives 0. */
+u64 seconds_to_ticks(double seconds);
+
 /*
  * Sleeps until ready(ctx) returns true, the deadline passes, or Ctrl+C is pressed.
  * ready is called with interrupts masked; may be NULL.
@@ -60,6 +62,14 @@ void sleep_until(u64 deadline);
  */
 void watchdog_set(u64 period, interrupt_handler handler);
 void watchdog_restart(void);
+
+/* UTC dates and seconds since 1970. wday is 1 for Sunday, yday 1 for January 1. */
+struct date {
+    long year, month, day, hour, min, sec, wday, yday;
+};
+
+long days_from_civil(long y, long m, long d);
+void civil_from_time(long t, struct date *out);
 
 /* ---------------------------------------------------------------------------------------- */
 /* Console */

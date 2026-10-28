@@ -19,7 +19,7 @@ function shell.restore(depth, input, output, errors)
   local files = streams.files
   if depth then
     for i = #files, depth + 1, -1 do
-      pcall(files[i].close, files[i]) -- the program may have closed it
+      pcall(files[i].close, files[i])
       files[i] = nil
     end
     io.input(input)
@@ -56,9 +56,6 @@ function shell.parse(...)
   return args, options
 end
 
--- For programs: checks the options against the allowed letters. Returns 0 after printing the usage
--- text for --help, or -h unless it is an allowed option, 1 after printing it to stderr for an unknown
--- option, nil if all is well.
 function shell.check(options, usage, allowed)
   if options.help or (options.h and not (allowed or ""):find("h", 1, true)) then
     io.write(usage)
@@ -279,8 +276,6 @@ function builtins.unset(...)
   end
 end
 
--- Programs that run, by pid: {pid, parent, command, streams}. The streams are the record the
--- program runs with, see system.streams in /init.lua.
 shell.processes = {}
 local nextPid = 0
 
@@ -318,7 +313,7 @@ function shell.run(path, ...)
   elseif isExit(result) then
     return toCode(result.exit)
   elseif term.powerRequest(result) then
-    error(result, 0) -- up to /init.lua
+    error(result, 0)
   end
   io.stderr:write(result, "\n")
   return term.systemError(result) == "interrupt" and 130 or 1

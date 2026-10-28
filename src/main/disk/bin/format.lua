@@ -2,11 +2,11 @@ local shell = require("shell")
 local medium = require("medium")
 
 local USAGE = [[
-Usage: format [-y] [-f] [-c] <path> [label]
-Writes a new, empty file system on the medium mounted at <path>, e.g. /mnt/1.
-All data on it is lost. Only blank media are formatted without -f. -y does not
-ask first. The medium keeps its label, -c clears it, a label argument sets it,
-see label -h.
+Usage: format [-y] [-f] [-c] <drive> [label]
+Creates an empty file system on the medium in a drive, e.g. /dev/vdb or /mnt/1.
+  -y  do not ask first
+  -f  format a medium that is not blank, its data is lost
+  -c  clear the label
 ]]
 
 local args, options = shell.parse(...)
@@ -41,6 +41,7 @@ if not ok then
 end
 for _, mount in ipairs(fs.mounts()) do
   if mount.index == target.index then
-    print(string.format("%s: %d KiB, %d KiB free", mount.path, mount.size // 1024, mount.free // 1024))
+    print(string.format("%s on %s: %d KiB, %d KiB free", medium.device(mount.index), mount.path, mount.size // 1024,
+      mount.free // 1024))
   end
 end

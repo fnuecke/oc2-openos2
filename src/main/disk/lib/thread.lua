@@ -9,7 +9,7 @@ local term = require("term")
 
 local thread = {}
 
-local BLOCKED = system.BLOCKED -- what a thread's computer.pullSignal yields, with "wait" and its deadline
+local BLOCKED = system.BLOCKED
 local threads = {}
 local current
 local nextId = 0

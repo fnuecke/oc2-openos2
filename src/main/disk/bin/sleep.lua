@@ -2,8 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: sleep <seconds>
-Waits for the number of seconds, which may have a fraction. Ctrl+C ends the
-wait.
+Waits for a number of seconds.
 ]]
 
 local args, options = shell.parse(...)

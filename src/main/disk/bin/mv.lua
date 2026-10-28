@@ -3,7 +3,7 @@ local transfer = require("transfer")
 
 local USAGE = [[
 Usage: mv <from>... <to>
-Moves or renames files and directories, also between mounts.
+Moves or renames files and directories.
 ]]
 
 local args, options = shell.parse(...)

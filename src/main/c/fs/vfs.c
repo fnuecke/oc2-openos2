@@ -1,22 +1,22 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Dispatches the fs_* API to ext2 (/, /mnt/<label> and /mnt/<device index>), 9p (/mnt/<mount tag>)
- * or sysfs (/sys), and has /dev/null. File descriptors of sysfs and 9p files and of whole media are
- * offset by SYS_FD_BASE, P9_FD_BASE and RAW_FD_BASE.
+ * Dispatches the fs_* API to ext2 (/, /mnt/<label> and /mnt/<device index>), 9p (/mnt/<mount tag>),
+ * sysfs (/sys) or devfs (/dev). Backend file descriptors are offset into contiguous, ascending ranges.
  */
 
 #include <stdlib.h>
 #include <string.h>
+#include "devfs.h"
 #include "ext2.h"
 #include "internal.h"
 #include "p9.h"
 #include "sysfs.h"
 #include "vfs.h"
 
-#define SYS_FD_BASE 48
-#define P9_FD_BASE 64
-#define RAW_FD_BASE 96
-#define DEV_NULL_FD 127
+#define SYS_FD_BASE EXT2_MAX_FILES
+#define P9_FD_BASE (SYS_FD_BASE + SYSFS_MAX_FILES)
+#define RAW_FD_BASE (P9_FD_BASE + P9_MAX_FILES)
+#define DEV_FD_BASE (RAW_FD_BASE + EXT2_RAW_HANDLES)
 
 #define NORMALIZE(path, buffer) \
     char buffer[FS_PATH_LENGTH]; \
@@ -29,10 +29,24 @@
         path = buffer; \
     } while (0)
 
+#define MOUNT_POINT(path, buffer) \
+    char buffer[EXT2_PATH_LENGTH]; \
+    do { \
+        const char *dev = dev_path(path); \
+        u32 mount_serial; \
+        if (dev != NULL) { \
+            const int found = devfs_mount_point(dev, buffer, &mount_serial); \
+            if (found != 0) { \
+                return found; \
+            } \
+            path = buffer; \
+        } \
+    } while (0)
+
 #define MAX_MEDIUM_EVENTS 16
 
 static struct {
-    char path[48];
+    char path[FS_MOUNT_PATH_LENGTH];
     const char *what;
 } medium_events[MAX_MEDIUM_EVENTS];
 static u32 medium_head, medium_tail;
@@ -106,6 +120,7 @@ const char *fs_error(const int code) {
         case FS_UNSUPPORTED: return "Unsupported file system";
         case FS_IS_ROOT: return "Is the boot medium";
         case FS_NOT_BLANK: return "Medium holds data";
+        case FS_NO_MEDIUM: return "No medium found";
         default: return "Unknown error";
     }
 }
@@ -165,10 +180,25 @@ static const char *sys_path(const char *path) {
     return strncmp(path, "/sys", 4) == 0 && (path[4] == 0 || path[4] == '/') ? path + 4 : NULL;
 }
 
+static const char *dev_path(const char *path) {
+    return strncmp(path, "/dev", 4) == 0 && (path[4] == 0 || path[4] == '/') ? path + 4 : NULL;
+}
+
+static bool is_virtual(const char *path) {
+    const char *rest;
+    return sys_path(path) != NULL || dev_path(path) != NULL || p9_resolve(path, &rest) != NULL;
+}
+
 int fs_unmount(const char *path, const u32 serial) {
     NORMALIZE(path, normalized_path);
-    const char *rest;
-    return sys_path(path) != NULL || p9_resolve(path, &rest) != NULL ? FS_INVALID : ext2_unmount(path, serial);
+    MOUNT_POINT(path, mount_point);
+    return is_virtual(path) ? FS_INVALID : ext2_unmount(path, serial);
+}
+
+int fs_mount(const char *path) {
+    NORMALIZE(path, normalized_path);
+    MOUNT_POINT(path, mount_point);
+    return is_virtual(path) ? FS_INVALID : ext2_mount(path);
 }
 
 void fs_poll_media(void) {
@@ -195,6 +225,10 @@ bool fs_medium_event_pending(void) {
 
 int fs_info(const char *path, u64 *total, u64 *free) {
     NORMALIZE(path, normalized_path);
+    MOUNT_POINT(path, mount_point);
+    if (sys_path(path) != NULL) {
+        return FS_INVALID;
+    }
     const char *rest;
     struct p9 *m = p9_resolve(path, &rest);
     return m != NULL ? p9_info(m, total, free) : ext2_info(path, total, free);
@@ -202,9 +236,9 @@ int fs_info(const char *path, u64 *total, u64 *free) {
 
 int fs_stat(const char *path, struct fs_stat *st) {
     NORMALIZE(path, normalized_path);
-    if (strcmp(path, "/dev/null") == 0) {
-        *st = (struct fs_stat) {0};
-        return 0;
+    *st = (struct fs_stat) {0};
+    if (dev_path(path) != NULL) {
+        return devfs_stat(dev_path(path), st);
     }
     if (sys_path(path) != NULL) {
         return sysfs_stat(sys_path(path), st);
@@ -223,6 +257,9 @@ static bool is_mnt(const char *path) {
 
 int fs_list(const char *path, struct fs_listing *out) {
     NORMALIZE(path, normalized_path);
+    if (dev_path(path) != NULL) {
+        return devfs_list(dev_path(path), out);
+    }
     if (sys_path(path) != NULL) {
         return sysfs_list(sys_path(path), out);
     }
@@ -233,6 +270,7 @@ int fs_list(const char *path, struct fs_listing *out) {
     }
     const int result = ext2_list(path, out);
     if (result == 0 && strcmp(path, "/") == 0) {
+        fs_listing_add_unique(out, "dev", 3, 1);
         fs_listing_add_unique(out, "sys", 3, 1);
     }
     if (is_mnt(path)) {
@@ -245,6 +283,7 @@ int fs_list(const char *path, struct fs_listing *out) {
 
 int fs_label(const char *path, char *label) {
     NORMALIZE(path, normalized_path);
+    MOUNT_POINT(path, mount_point);
     if (sys_path(path) != NULL) {
         return FS_INVALID;
     }
@@ -258,8 +297,9 @@ int fs_label(const char *path, char *label) {
 
 fs_fd fs_open(const char *path, const int flags) {
     NORMALIZE(path, normalized_path);
-    if (strcmp(path, "/dev/null") == 0) {
-        return DEV_NULL_FD;
+    if (dev_path(path) != NULL) {
+        const int fd = devfs_open(dev_path(path), flags);
+        return fd < 0 ? fd : DEV_FD_BASE + fd;
     }
     const char *sys = sys_path(path);
     if (sys != NULL) {
@@ -277,8 +317,8 @@ fs_fd fs_open(const char *path, const int flags) {
 
 fs_fd fs_open_raw(const char *path, const int flags, const bool force, const u32 serial) {
     NORMALIZE(path, normalized_path);
-    const char *rest;
-    if (sys_path(path) != NULL || p9_resolve(path, &rest) != NULL) {
+    MOUNT_POINT(path, mount_point);
+    if (is_virtual(path)) {
         return FS_INVALID;
     }
     const int fd = ext2_open_raw(path, flags, force, serial);
@@ -290,7 +330,7 @@ fs_fd fs_open_raw(const char *path, const int flags, const bool force, const u32
 
 int fs_mkdir(const char *path) {
     NORMALIZE(path, normalized_path);
-    if (sys_path(path) != NULL) {
+    if (sys_path(path) != NULL || dev_path(path) != NULL) {
         return FS_READ_ONLY;
     }
     const char *rest;
@@ -301,7 +341,7 @@ int fs_mkdir(const char *path) {
 int fs_rename(const char *from, const char *to) {
     NORMALIZE(from, normalized_from);
     NORMALIZE(to, normalized_to);
-    if (sys_path(from) != NULL || sys_path(to) != NULL) {
+    if (sys_path(from) != NULL || sys_path(to) != NULL || dev_path(from) != NULL || dev_path(to) != NULL) {
         return FS_READ_ONLY;
     }
     const char *from_rest, *to_rest;
@@ -315,7 +355,7 @@ int fs_rename(const char *from, const char *to) {
 
 int fs_remove(const char *path) {
     NORMALIZE(path, normalized_path);
-    if (sys_path(path) != NULL) {
+    if (sys_path(path) != NULL || dev_path(path) != NULL) {
         return FS_READ_ONLY;
     }
     const char *rest;
@@ -325,14 +365,14 @@ int fs_remove(const char *path) {
 
 int fs_format(const char *path, const char *label, const bool force, const u32 serial) {
     NORMALIZE(path, normalized_path);
-    const char *rest;
-    return sys_path(path) != NULL || p9_resolve(path, &rest) != NULL ? FS_INVALID : ext2_format(path, label, force, serial);
+    MOUNT_POINT(path, mount_point);
+    return is_virtual(path) ? FS_INVALID : ext2_format(path, label, force, serial);
 }
 
 int fs_set_label(const char *path, const char *label, const u32 serial) {
     NORMALIZE(path, normalized_path);
-    const char *rest;
-    return sys_path(path) != NULL || p9_resolve(path, &rest) != NULL ? FS_INVALID : ext2_set_label(path, label, serial);
+    MOUNT_POINT(path, mount_point);
+    return is_virtual(path) ? FS_INVALID : ext2_set_label(path, label, serial);
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -340,7 +380,7 @@ int fs_set_label(const char *path, const char *label, const u32 serial) {
 
 long fs_read(const fs_fd fd, void *dst, const size_t len) {
     power_check();
-    return fd == DEV_NULL_FD ? 0
+    return fd >= DEV_FD_BASE ? devfs_read(fd - DEV_FD_BASE, dst, len)
         : fd >= RAW_FD_BASE ? ext2_raw_read(fd - RAW_FD_BASE, dst, len)
         : fd >= P9_FD_BASE ? p9_read(fd - P9_FD_BASE, dst, len)
         : fd >= SYS_FD_BASE ? sysfs_read(fd - SYS_FD_BASE, dst, len)
@@ -349,7 +389,7 @@ long fs_read(const fs_fd fd, void *dst, const size_t len) {
 
 long fs_write(const fs_fd fd, const void *src, const size_t len) {
     power_check();
-    return fd == DEV_NULL_FD ? (long) len
+    return fd >= DEV_FD_BASE ? devfs_write(fd - DEV_FD_BASE, src, len)
         : fd >= RAW_FD_BASE ? ext2_raw_write(fd - RAW_FD_BASE, src, len)
         : fd >= P9_FD_BASE ? p9_write(fd - P9_FD_BASE, src, len)
         : fd >= SYS_FD_BASE ? FS_READ_ONLY
@@ -358,7 +398,7 @@ long fs_write(const fs_fd fd, const void *src, const size_t len) {
 
 long fs_seek(const fs_fd fd, const long offset, const int whence) {
     power_check();
-    return fd == DEV_NULL_FD ? 0
+    return fd >= DEV_FD_BASE ? devfs_seek(fd - DEV_FD_BASE, offset, whence)
         : fd >= RAW_FD_BASE ? ext2_raw_seek(fd - RAW_FD_BASE, offset, whence)
         : fd >= P9_FD_BASE ? p9_seek(fd - P9_FD_BASE, offset, whence)
         : fd >= SYS_FD_BASE ? sysfs_seek(fd - SYS_FD_BASE, offset, whence)
@@ -367,7 +407,7 @@ long fs_seek(const fs_fd fd, const long offset, const int whence) {
 
 int fs_close(const fs_fd fd) {
     power_check();
-    return fd == DEV_NULL_FD ? 0
+    return fd >= DEV_FD_BASE ? devfs_close(fd - DEV_FD_BASE)
         : fd >= RAW_FD_BASE ? ext2_raw_close(fd - RAW_FD_BASE)
         : fd >= P9_FD_BASE ? p9_close(fd - P9_FD_BASE)
         : fd >= SYS_FD_BASE ? sysfs_close(fd - SYS_FD_BASE)

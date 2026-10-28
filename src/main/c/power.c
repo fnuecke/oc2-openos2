@@ -7,7 +7,7 @@
 
 #define REQUEST_TIMEOUT_S 5
 
-static volatile int requested; /* POWER_OFF_REQUEST or POWER_REBOOT_REQUEST, 0 if none */
+static volatile int requested;
 static volatile u64 requested_at;
 static interrupt_handler request_handler;
 

@@ -1,10 +1,10 @@
+local medium = require("medium")
 local shell = require("shell")
 
 local USAGE = [[
-Usage: label [-c] <path> [label]
-Prints the label of the medium mounted at <path>, sets it, or with -c clears
-it. A labeled medium is mounted at /mnt/<label>, otherwise at /mnt/<drive
-number>. Labels are up to 16 of A-Z a-z 0-9 . _ -, and not only digits.
+Usage: label [-c] <drive> [label]
+Prints or sets the label of the medium in a drive, e.g. /dev/vdb or /mnt/1.
+  -c  clear the label
 ]]
 
 local args, options = shell.parse(...)
@@ -16,12 +16,8 @@ if #args < 1 or #args > (options.c and 1 or 2) then
   return shell.usage(USAGE)
 end
 local path = shell.resolve(args[1])
-local index, serial
-for _, mount in ipairs(fs.mounts()) do
-  if mount.path == path then
-    index, serial = mount.index, mount.serial
-  end
-end
+local target = medium.find(path, true)
+local index, serial = target and target.index, target and target.serial
 local new = options.c and "" or args[2]
 local label, reason = fs.label(path, new, serial)
 if not label then
@@ -33,7 +29,7 @@ if new == nil then
   return 0
 end
 for _, mount in ipairs(fs.mounts()) do
-  if index and mount.index == index and mount.path ~= path then
+  if index and mount.index == index and mount.path ~= target.path then
     print("mounted at " .. mount.path)
   end
 end

@@ -5,7 +5,7 @@
  * and serial ports, opened as /dev/ttyS<n>.
  */
 
-#include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include "drivers/serial.h"
 #include "drivers/virtio/virtio.h"
@@ -14,12 +14,6 @@
 #include "lauxlib.h"
 #include "lua.h"
 
-#define E_INTR 4
-#define E_BADF 9
-#define E_AGAIN 11
-#define E_NOENT 2
-#define E_NOSYS 38
-
 #define O_RDONLY_ 0
 #define O_WRONLY_ 1
 #define O_RDWR_ 2
@@ -27,8 +21,7 @@
 #define O_CLOEXEC_ 02000000
 
 #define FD_BASE 3
-#define MAX_PORTS 8
-#define SERIAL_FD_BASE (FD_BASE + MAX_PORTS)
+#define SERIAL_FD_BASE (FD_BASE + VCON_MAX_PORTS)
 #define READ_MAX 4096
 #define POLL_MAX 8
 
@@ -38,9 +31,9 @@
 static int fail_errno(lua_State *L, const int number) {
     const char *message;
     switch (number) {
-        case E_AGAIN: message = "Resource temporarily unavailable"; break;
-        case E_NOENT: message = "No such file or directory"; break;
-        case E_BADF: message = "Bad file descriptor"; break;
+        case EAGAIN: message = "Resource temporarily unavailable"; break;
+        case ENOENT: message = "No such file or directory"; break;
+        case EBADF: message = "Bad file descriptor"; break;
         default: message = "Function not implemented"; break;
     }
     luaL_pushfail(L);
@@ -50,12 +43,12 @@ static int fail_errno(lua_State *L, const int number) {
 }
 
 static int not_supported(lua_State *L) {
-    return fail_errno(L, E_NOSYS);
+    return fail_errno(L, ENOSYS);
 }
 
 static int port_of(lua_State *L, const int index) {
     const lua_Integer fd = luaL_checkinteger(L, index);
-    return fd >= FD_BASE && fd < FD_BASE + MAX_PORTS ? (int) (fd - FD_BASE) : -1;
+    return fd >= FD_BASE && fd < FD_BASE + VCON_MAX_PORTS ? (int) (fd - FD_BASE) : -1;
 }
 
 static int serial_of_fd(const lua_Integer fd) {
@@ -79,26 +72,28 @@ static void set_constant(lua_State *L, const char *name, const lua_Integer value
     lua_setfield(L, -2, name);
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.errno */
 
 int luaopen_posix_errno(lua_State *L) {
     lua_newtable(L);
-    set_constant(L, "EINTR", E_INTR);
-    set_constant(L, "EAGAIN", E_AGAIN);
-    set_constant(L, "EWOULDBLOCK", E_AGAIN);
-    set_constant(L, "ENOENT", E_NOENT);
-    set_constant(L, "EBADF", E_BADF);
-    set_constant(L, "ENOSYS", E_NOSYS);
+    set_constant(L, "EINTR", EINTR);
+    set_constant(L, "EAGAIN", EAGAIN);
+    set_constant(L, "EWOULDBLOCK", EAGAIN);
+    set_constant(L, "ENOENT", ENOENT);
+    set_constant(L, "EBADF", EBADF);
+    set_constant(L, "ENOSYS", ENOSYS);
     return 1;
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.fcntl */
 
 static int l_open(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     luaL_optinteger(L, 2, 0);
     if (strncmp(path, "/dev/", 5) != 0) {
-        return fail_errno(L, E_NOENT);
+        return fail_errno(L, ENOENT);
     }
     const char *name = path + 5;
     const int serial = serial_find(name);
@@ -107,17 +102,16 @@ static int l_open(lua_State *L) {
         return 1;
     }
     const int port = vcon_open(name, time_now() + time_frequency());
-    if (port < 0 || port >= MAX_PORTS) {
-        return fail_errno(L, E_NOENT);
+    if (port < 0 || port >= VCON_MAX_PORTS) {
+        return fail_errno(L, ENOENT);
     }
     lua_pushinteger(L, FD_BASE + port);
     return 1;
 }
 
-/* Flags are accepted and ignored: ports are always non-blocking and close-on-exec has no meaning. */
 static int l_fcntl(lua_State *L) {
     if (!valid_fd(L, 1)) {
-        return fail_errno(L, E_BADF);
+        return fail_errno(L, EBADF);
     }
     lua_pushinteger(L, 0);
     return 1;
@@ -144,6 +138,7 @@ int luaopen_posix_fcntl(lua_State *L) {
     return 1;
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.unistd */
 
 static int l_read(lua_State *L) {
@@ -151,7 +146,7 @@ static int l_read(lua_State *L) {
     const int serial = serial_of(L, 1);
     lua_Integer count = luaL_checkinteger(L, 2);
     if (port < 0 && serial < 0) {
-        return fail_errno(L, E_BADF);
+        return fail_errno(L, EBADF);
     }
     if (count > READ_MAX) {
         count = READ_MAX;
@@ -162,13 +157,12 @@ static int l_read(lua_State *L) {
         : serial >= 0 ? (long) serial_read(serial, buffer, (size_t) count)
         : vcon_read(port, buffer, (size_t) count, 0);
     if (got == 0 && count > 0) {
-        return fail_errno(L, E_AGAIN);
+        return fail_errno(L, EAGAIN);
     }
     luaL_pushresultsize(&b, (size_t) got);
     return 1;
 }
 
-/* Drops the references to strings the host has finished reading. */
 static void reclaim(lua_State *L, const int port) {
     luaL_getsubtable(L, LUA_REGISTRYINDEX, IN_FLIGHT);
     int head;
@@ -187,13 +181,13 @@ static int l_write(lua_State *L) {
     if (serial >= 0) {
         const size_t written = serial_write(serial, data, len);
         if (written == 0 && len > 0) {
-            return fail_errno(L, E_AGAIN);
+            return fail_errno(L, EAGAIN);
         }
         lua_pushinteger(L, (lua_Integer) written);
         return 1;
     }
     if (port < 0) {
-        return fail_errno(L, E_BADF);
+        return fail_errno(L, EBADF);
     }
     reclaim(L, port);
     if (len == 0) {
@@ -202,7 +196,7 @@ static int l_write(lua_State *L) {
     }
     const int head = vcon_send(port, data, len);
     if (head < 0) {
-        return fail_errno(L, E_AGAIN);
+        return fail_errno(L, EAGAIN);
     }
     luaL_getsubtable(L, LUA_REGISTRYINDEX, IN_FLIGHT);
     lua_pushvalue(L, 2);
@@ -212,10 +206,9 @@ static int l_write(lua_State *L) {
     return 1;
 }
 
-/* Ports stay open, they are shared and have no per-descriptor state. */
 static int l_close(lua_State *L) {
     if (!valid_fd(L, 1)) {
-        return fail_errno(L, E_BADF);
+        return fail_errno(L, EBADF);
     }
     lua_pushinteger(L, 0);
     return 1;
@@ -233,6 +226,7 @@ int luaopen_posix_unistd(lua_State *L) {
     return 1;
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.poll */
 
 struct poll_set {
@@ -243,7 +237,7 @@ struct poll_set {
 };
 
 static int fd_valid(const lua_Integer fd) {
-    return (fd >= FD_BASE && fd < FD_BASE + MAX_PORTS) || serial_of_fd(fd) >= 0;
+    return (fd >= FD_BASE && fd < FD_BASE + VCON_MAX_PORTS) || serial_of_fd(fd) >= 0;
 }
 
 static int fd_readable(const lua_Integer fd) {
@@ -271,13 +265,12 @@ static bool poll_ready(void *ctx) {
 static int l_rpoll(lua_State *L) {
     struct poll_set set = {1, {luaL_checkinteger(L, 1)}, {1}, {0}};
     if (!fd_valid(set.fds[0])) {
-        return fail_errno(L, E_BADF);
+        return fail_errno(L, EBADF);
     }
     lua_pushinteger(L, wait_until(poll_ready, &set, deadline_ms(luaL_optinteger(L, 2, -1))) ? 1 : 0);
     return 1;
 }
 
-/* poll({[fd] = {events = {IN = true, OUT = true}}, ...}, timeout): sets revents, returns the ready count. */
 static int l_poll(lua_State *L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     struct poll_set set = {0};
@@ -329,6 +322,7 @@ int luaopen_posix_poll(lua_State *L) {
     return 1;
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.time */
 
 static int l_clock_gettime(lua_State *L) {
@@ -365,6 +359,7 @@ int luaopen_posix_time(lua_State *L) {
     return 1;
 }
 
+/* ---------------------------------------------------------------------------------------- */
 /* posix.signal, posix.sys.stat, posix.sys.socket */
 
 static int l_signal(lua_State *L) {
@@ -412,14 +407,16 @@ int luaopen_posix_sys_socket(lua_State *L) {
     return 1;
 }
 
-/* posix.dirent: dir(path) lists a directory, with "." and "..", as luaposix does. */
+/* ---------------------------------------------------------------------------------------- */
+/* posix.dirent */
+
+struct fs_listing *push_listing(lua_State *L);
 
 static int l_dir(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
-    struct fs_listing listing = {0};
-    const int result = fs_list(path, &listing);
+    struct fs_listing *listing = push_listing(L);
+    const int result = fs_list(path, listing);
     if (result != 0) {
-        free(listing.data);
         return luaL_error(L, "%s: %s", path, fs_error(result));
     }
     lua_createtable(L, 8, 0);
@@ -428,11 +425,10 @@ static int l_dir(lua_State *L) {
     lua_pushliteral(L, "..");
     lua_rawseti(L, -2, 2);
     int n = 2;
-    for (size_t at = 0; at < listing.length; at += 2 + listing.data[at + 1]) {
-        lua_pushlstring(L, (const char *) listing.data + at + 2, listing.data[at + 1]);
+    for (size_t at = 0; at < listing->length; at += 2 + listing->data[at + 1]) {
+        lua_pushlstring(L, (const char *) listing->data + at + 2, listing->data[at + 1]);
         lua_rawseti(L, -2, ++n);
     }
-    free(listing.data);
     return 1;
 }
 

@@ -2,8 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: time <program> [arg...]
-Runs the program and prints how long it took. There is one program running at a
-time, so this is also the processor time it used.
+Runs a program and prints how long it took.
 ]]
 
 local name = ...

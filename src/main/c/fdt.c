@@ -42,9 +42,9 @@ struct node {
     u32 offset;
     u32 value;
     int plic_context;
-    int in_reserved; /* below /reserved-memory */
+    int in_reserved;
     int is_chosen;
-    int is_sedna_syscon; /* has host power requests, see drivers/syscon.c */
+    int is_sedna_syscon;
     u32 clock;
 };
 
@@ -216,9 +216,9 @@ static void prop(struct node *node, const struct node *parent, const char *name,
         if (len >= 8) {
             node->irq = be32(value + 4);
         }
-        /* For the PLIC, the pairs are per context, cause 9 is the S-mode external interrupt. */
+        /* For the PLIC, the pairs are per context. */
         for (u32 i = 0; i + 8 <= len; i += 8) {
-            if (be32(value + i + 4) == 9) {
+            if (be32(value + i + 4) == IRQ_S_EXTERNAL) {
                 node->plic_context = (int) (i / 8);
                 break;
             }
@@ -235,7 +235,6 @@ static void prop(struct node *node, const struct node *parent, const char *name,
     }
 }
 
-/* The console is the UART stdout-path names, else the first one. The others are serial ports. */
 static void assign_uarts(void) {
     int console = 0;
     for (int i = 0; i < uart_count; i++) {

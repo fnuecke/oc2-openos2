@@ -5,6 +5,8 @@
 
 #include "vfs.h"
 
+#define P9_MAX_FILES 8
+
 struct p9;
 typedef int p9_fd;
 

@@ -1,8 +1,7 @@
 local USAGE = [[
 Usage: luac [-p] [-s] [-o output] file.lua
-Compiles a Lua file to bytecode. The output is the file with .luac instead of
-.lua, unless given. The shell runs file.luac in place of file.lua.
-  -o output  write the bytecode to output
+Compiles a Lua file to bytecode.
+  -o output  output file, default file.luac
   -p         only check the syntax, write nothing
   -s         strip debug information
 ]]

@@ -59,7 +59,7 @@ function builtins.source(file)
   for line in io.lines(path) do
     code = shell.execute(line)
     if code == 130 then
-      break -- Ctrl+C ends the script, like in bash
+      break
     end
   end
   return code

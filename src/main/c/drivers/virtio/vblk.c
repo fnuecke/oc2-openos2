@@ -92,7 +92,7 @@ static int transfer(struct vblk *blk, const u32 type, const u64 sector, void *da
     if (virtio_config_changed(blk->queue.base)) {
         return VBLK_CHANGED;
     }
-    if (len == 0 || (len & 511) != 0 || sector + len / 512 > blk->capacity) {
+    if (len == 0 || len % VBLK_SECTOR_SIZE != 0 || sector + len / VBLK_SECTOR_SIZE > blk->capacity) {
         return -1;
     }
     blk->request.type = type;

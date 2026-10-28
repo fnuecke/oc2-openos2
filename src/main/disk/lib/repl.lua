@@ -49,7 +49,6 @@ end
 function repl.run(env)
   local history = {}
   while true do
-    -- Ctrl+C raises an error wherever Lua code runs, including in term.read.
     local ok, result = system.rawpcall(step, history, env or _G)
     if not ok then
       if term.powerRequest(result) or type(result) == "table" and result.exit ~= nil then

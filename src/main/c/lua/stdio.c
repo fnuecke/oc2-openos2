@@ -29,7 +29,6 @@ int app_fprintf(FILE *f, const char *format, ...) {
     return len;
 }
 
-/* lua-cjson only exits on errors it cannot recover from. */
 void app_exit(const int code) {
     kprintf("\n*** exit(%d)\n", code);
     power_off();

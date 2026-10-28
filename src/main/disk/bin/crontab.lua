@@ -2,9 +2,11 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: crontab [file | -l | -e | -r]
-Installs file as the crontab, $HOME/.crontab, or lists, edits or removes it.
-Lines are "minute hour day month weekday command" or "@reboot command".
-Fields take *, lists (1,2), ranges (1-5) and steps (*/15). Times are UTC.
+Manages the crontab, $HOME/.crontab.
+  file  install file as the crontab
+  -l    print the crontab
+  -e    edit the crontab
+  -r    remove the crontab
 ]]
 
 local args, options = shell.parse(...)

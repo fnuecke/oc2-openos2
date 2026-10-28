@@ -2,8 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: ps
-Lists the programs that run, with the stages of pipelines, and the background
-threads.
+Lists the running programs and background threads.
 ]]
 
 local args, options = shell.parse(...)

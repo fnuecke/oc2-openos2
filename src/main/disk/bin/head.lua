@@ -1,26 +1,31 @@
 local shell = require("shell")
 
 local USAGE = [[
-Usage: head [-n <lines> | -<lines>] [file...]
-Prints the first 10 lines, or as many as given, of the files or the input.
+Usage: head [-n <lines> | -<lines> | -c <bytes>] [file...]
+Prints the first lines of the files, or of the input.
+  -n lines  number of lines, default 10
+  -c bytes  number of bytes
 ]]
 
 local raw = {}
 for _, arg in ipairs({...}) do
   local count = arg:match("^%-n(%d+)$") or arg:match("^%-(%d+)$")
-  if count then
-    raw[#raw + 1], raw[#raw + 2] = "-n", count
+  local bytes = arg:match("^%-c(%d+)$")
+  if count or bytes then
+    raw[#raw + 1], raw[#raw + 2] = count and "-n" or "-c", count or bytes
   else
     raw[#raw + 1] = arg
   end
 end
 local args, options = shell.parse(table.unpack(raw))
-local invalid = shell.check(options, USAGE, "n")
+local invalid = shell.check(options, USAGE, "nc")
 if invalid then
   return invalid
 end
 local count = 10
-if options.n then
+if options.n and options.c then
+  return shell.usage(USAGE)
+elseif options.n or options.c then
   count = tonumber(table.remove(args, 1))
   if not count then
     return shell.usage(USAGE)
@@ -42,16 +47,18 @@ for i, path in ipairs(args) do
     if #args > 1 then
       print((i > 1 and "\n" or "") .. "==> " .. path .. " <==")
     end
-    for _ = 1, count do
-      local line, readReason = file:read("L")
-      if not line then
+    local left = count
+    while left > 0 do
+      local data, readReason = file:read(options.c and math.min(left, 4096) or "L")
+      if not data then
         if readReason then
           io.stderr:write("head: ", path, ": ", readReason, "\n")
           code = 1
         end
         break
       end
-      io.write(line)
+      io.write(data)
+      left = left - (options.c and #data or 1)
     end
     if path ~= "-" then
       file:close()

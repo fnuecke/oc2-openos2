@@ -63,7 +63,6 @@ extern struct board board;
 /* time.c */
 
 void time_init(void);
-/* Called from the interrupt handler for the timer interrupt. */
 void time_interrupt(void);
 /* Ends the current wait_until(), like Ctrl+C does. Called from interrupt handlers. */
 void wait_wake(void);
@@ -73,7 +72,7 @@ void wait_clear_wake(void);
 void entropy_add(u64 value);
 /* Not random: copies of one machine started in the same RTC instants get the same value. */
 u64 entropy(void);
-/* splitmix64's finalizer: spreads every input bit over the result, e.g. for entropy(). */
+/* splitmix64's finalizer */
 u64 mix64(u64 x);
 
 /* ---------------------------------------------------------------------------------------- */
@@ -96,6 +95,8 @@ int fdt_scan(void *dtb);
 /* MMIO and CSR helpers */
 
 #define SSTATUS_SIE (1ul << 1)
+#define IRQ_S_TIMER 5
+#define IRQ_S_EXTERNAL 9
 
 static inline u8 mmio_read8(u64 address) {
     return *(volatile u8 *) address;

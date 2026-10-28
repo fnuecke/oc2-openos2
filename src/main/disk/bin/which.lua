@@ -2,7 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: which <program>...
-Prints the file each program name runs, looked up in $PATH.
+Prints the file each program name runs.
 ]]
 
 local args, options = shell.parse(...)

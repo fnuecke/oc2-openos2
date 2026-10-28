@@ -1,7 +1,6 @@
 local USAGE = [=[
 Usage: lua [script [arg...]]
-Runs a Lua script with the arguments, or the interactive Lua prompt without
-one.
+Runs a Lua script, or the interactive Lua prompt.
 ]=]
 
 local args = table.pack(...)

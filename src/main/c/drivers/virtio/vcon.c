@@ -30,7 +30,6 @@
 #define CONTROL_BUFFER (CONTROL_SIZE + 64)
 #define RECEIVE_BUFFERS 2
 #define RECEIVE_BUFFER 1024
-#define MAX_PORTS 8
 #define MAX_NAME 63
 
 struct control {
@@ -42,12 +41,12 @@ struct control {
 struct port {
     char name[MAX_NAME + 1];
     int named;
-    int opened; /* receive buffers are allocated on first open */
-    int notified; /* reported by vcon_take_signal since the last read */
-    int blocked; /* a send found no free descriptor */
+    int opened;
+    int notified;
+    int blocked;
     struct virtq rx, tx;
-    u8 *rx_buffers[QUEUE_SIZE]; /* by descriptor head */
-    int current; /* head of the receive buffer being consumed, or -1 */
+    u8 *rx_buffers[QUEUE_SIZE];
+    int current;
     u32 current_length, current_offset;
 };
 
@@ -58,7 +57,7 @@ static struct {
     struct virtq control_rx, control_tx;
     u8 *control_rx_buffers[QUEUE_SIZE];
     struct control control_tx_buffers[QUEUE_SIZE];
-    struct port ports[MAX_PORTS];
+    struct port ports[VCON_MAX_PORTS];
 } con;
 
 static int post_receive(struct virtq *q, u8 *buffer, const u32 size, u8 **by_head) {
@@ -150,8 +149,8 @@ int vcon_init(void) {
         con.base = base;
         con.irq = board.virtio_irq[i];
         con.port_count = virtio_config32(base, CONFIG_MAX_PORTS);
-        if (con.port_count > MAX_PORTS) {
-            con.port_count = MAX_PORTS;
+        if (con.port_count > VCON_MAX_PORTS) {
+            con.port_count = VCON_MAX_PORTS;
         }
         if (virtq_init(&con.control_rx, base, CONTROL_RECEIVE, QUEUE_SIZE) != 0
             || virtq_init(&con.control_tx, base, CONTROL_TRANSMIT, QUEUE_SIZE) != 0) {

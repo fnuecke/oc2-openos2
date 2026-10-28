@@ -7,13 +7,13 @@ local MAX_HISTORY = 50
 local ESCAPE_TIMEOUT = 0.05
 
 local pending, position = "", 1
-local pendingInterrupts = 0 -- console.interrupts() when pending was pulled
+local pendingInterrupts = 0
 local lastWasCR = false
 local column = 0
 
 local function refill(timeout)
   if console.interrupts() ~= pendingInterrupts then
-    pending, position = "", 1 -- typed ahead of a Ctrl+C
+    pending, position = "", 1
   end
   while position > #pending do
     local _, data = event.pull(timeout, "console")
@@ -42,7 +42,7 @@ local TILDE_KEYS = {"home", "insert", "delete", "end", "pageup", "pagedown", "ho
 
 local PASTE_LIMIT = 16384
 local PASTE_END = "\27[201~"
-local pasting = false -- in a paste that an error cut short: the rest is dropped, see term.key
+local pasting = false
 
 local function readPaste(timeout)
   local parts, size, carry = {}, 0, ""
@@ -113,11 +113,6 @@ local function escapeKey()
     .. (modifier & 4 ~= 0 and "ctrl-" or "") .. name
 end
 
--- Returns the next key: a single character for printable input and control characters, or a name
--- such as "enter", "backspace", "tab", "left", "home", "delete", "pageup", "f3" or "escape", with
--- "shift-", "alt-" or "ctrl-" in front for modified keys, e.g. "ctrl-delete". "paste" comes with
--- the pasted text, "mouse" with {button, x, y, pressed} (xterm SGR reporting). Returns nil after
--- timeout seconds, if given.
 function term.key(timeout)
   if pasting then
     readPaste(ESCAPE_TIMEOUT * 10)
@@ -196,7 +191,8 @@ function term.column()
   return column
 end
 
-local pastedLines = {} -- the lines after the first of a paste, read by the next calls, like bash
+local pastedLines = {}
+local lineRest = "" -- the rest of a line read in part, see readFormat
 
 local function isWordByte(line, i)
   return line:sub(i, i):find("^[%w_]") ~= nil
@@ -231,12 +227,18 @@ local function addHistory(history, line)
   end
 end
 
--- Tab calls complete(line, cursor, again), with again set for a second Tab in a row. It returns
--- the new line and cursor, or nothing after printing below the line, which is then drawn again.
 function term.read(prompt, history, complete)
   if prompt then
     term.write(prompt)
   end
+  if lineRest ~= "" and console.interrupts() == pendingInterrupts then
+    local line = lineRest:sub(1, -2)
+    lineRest = ""
+    term.write(line, "\n")
+    addHistory(history, line)
+    return line
+  end
+  lineRest = ""
   if #pastedLines > 0 then
     local line = table.remove(pastedLines, 1)
     term.write(line, "\n")
@@ -361,11 +363,19 @@ term.stream = stream
 
 local function readFormat(format)
   if type(format) == "number" then
-    local bytes = {}
-    for i = 1, format do
-      bytes[i] = nextByte()
+    if format <= 0 then
+      return ""
     end
-    return table.concat(bytes)
+    if lineRest == "" then
+      local line = term.read()
+      if line == nil then
+        return nil
+      end
+      lineRest = line .. "\n"
+    end
+    local data = lineRest:sub(1, format)
+    lineRest = lineRest:sub(format + 1)
+    return data
   end
   format = (format or "l"):gsub("^%*", "")
   if format:sub(1, 1) == "a" then
@@ -375,7 +385,12 @@ local function readFormat(format)
     end
     return table.concat(lines)
   end
-  local line = term.read()
+  local line
+  if lineRest ~= "" then
+    line, lineRest = lineRest:sub(1, -2), ""
+  else
+    line = term.read()
+  end
   if line and format:sub(1, 1) == "L" then
     line = line .. "\n"
   end
@@ -423,5 +438,6 @@ end
 function stream:close()
   return true
 end
+setmetatable(stream, {__close = stream.close})
 
 return term

@@ -15,8 +15,6 @@
 #define PLIC_CLAIM 0x200004
 #define PLIC_CONTEXT_STRIDE 0x1000
 
-#define SIE_SEIE (1ul << 9)
-
 static u64 context_base(void) {
     return board.plic + (u64) board.plic_context * PLIC_CONTEXT_STRIDE;
 }
@@ -27,7 +25,7 @@ void plic_init(void) {
         halt();
     }
     mmio_write32(context_base() + PLIC_THRESHOLD, 0);
-    csr_set(sie, SIE_SEIE);
+    csr_set(sie, 1ul << IRQ_S_EXTERNAL);
 }
 
 void plic_enable(const u32 irq) {

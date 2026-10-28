@@ -80,13 +80,14 @@ int virtq_next_used(struct virtq *q, u32 *len);
 
 /* Returned by vblk_read and vblk_write while a medium change is pending, see vblk_media_changed. */
 #define VBLK_CHANGED (-2)
+#define VBLK_SECTOR_SIZE 512
 
 struct vblk;
 void vblk_init(void);
 int vblk_count(void);
 struct vblk *vblk_get(int index);
 struct vblk *vblk_open(u64 base);
-u64 vblk_capacity(const struct vblk *blk); /* in 512-byte sectors */
+u64 vblk_capacity(const struct vblk *blk); /* in sectors */
 /* Returns whether the medium changed since the last call, and acknowledges the change. */
 bool vblk_media_changed(struct vblk *blk);
 bool vblk_change_pending(const struct vblk *blk);
@@ -96,6 +97,8 @@ int vblk_write(struct vblk *blk, u64 sector, const void *src, u32 len);
 
 /* ---------------------------------------------------------------------------------------- */
 /* vcon.c: named virtio-console ports, e.g. oc2's device bus, also known as vport0p<index> */
+
+#define VCON_MAX_PORTS 8
 
 /* For the kernel */
 int vcon_init(void);

@@ -2,7 +2,6 @@ local shell = require("shell")
 
 local glob = {}
 
--- Wildcards as in sh: * ? [abc] [a-z] [!a] [^a], backslash for literals.
 local function toLuaPattern(pattern)
   local result, i = {"^"}, 1
   while i <= #pattern do

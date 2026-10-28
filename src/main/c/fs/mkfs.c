@@ -26,7 +26,8 @@
 #define LOST_FOUND_BLOCKS 12
 #define MIN_BLOCKS 60
 #define MIB (1024 * 1024ull)
-#define HEAD_BLOCKS 16
+#define HEAD_BLOCKS (EXT2_HEAD_SIZE / BLOCK_SIZE)
+#define FIRST_DATA_BLOCK (EXT2_SUPERBLOCK_OFFSET / BLOCK_SIZE)
 
 #define S_INODES_COUNT 0x00
 #define S_BLOCKS_COUNT 0x04
@@ -78,8 +79,6 @@
 #define I_EXTRA_ISIZE 0x80
 #define I_CRTIME 0x90
 
-#define DIR_MODE_0755 0x41ED
-#define DIR_MODE_0700 0x41C0
 #define ERRORS_CONTINUE 1
 #define HASH_HALF_MD4 1
 #define DEFAULT_MOUNT_XATTR_USER 0x4
@@ -110,7 +109,7 @@ static void put32(u8 *p, const u32 offset, const u32 value) {
 }
 
 static u32 group_start(const u32 group) {
-    return 1 + group * BLOCKS_PER_GROUP;
+    return FIRST_DATA_BLOCK + group * BLOCKS_PER_GROUP;
 }
 
 static u32 group_blocks(const struct layout *l, const u32 group) {
@@ -134,7 +133,7 @@ static u32 overhead(const struct layout *l, const u32 group) {
 }
 
 static int plan(const u64 sectors, struct layout *l) {
-    const u64 bytes = sectors * 512;
+    const u64 bytes = sectors * VBLK_SECTOR_SIZE;
     l->blocks = bytes / BLOCK_SIZE > 0xFFFFFFFFull ? 0xFFFFFFFFu : (u32) (bytes / BLOCK_SIZE);
     l->blocks &= ~3u;
     const u32 ratio = bytes < 3 * MIB ? 8192 : bytes < 512 * MIB ? 4096 : 16384;
@@ -142,7 +141,7 @@ static int plan(const u64 sectors, struct layout *l) {
         if (l->blocks < MIN_BLOCKS) {
             return FS_NO_SPACE;
         }
-        l->groups = (l->blocks - 1 + BLOCKS_PER_GROUP - 1) / BLOCKS_PER_GROUP;
+        l->groups = (l->blocks - FIRST_DATA_BLOCK + BLOCKS_PER_GROUP - 1) / BLOCKS_PER_GROUP;
         const u64 inodes = (u64) l->blocks * BLOCK_SIZE / ratio;
         u64 per_group = (inodes + l->groups - 1) / l->groups;
         per_group = (per_group + INODES_PER_BLOCK - 1) / INODES_PER_BLOCK * INODES_PER_BLOCK & ~7ull;
@@ -176,7 +175,7 @@ static int write_block(const struct pass *pass, const u32 block, const void *dat
     if (block < HEAD_BLOCKS && pass->head != NULL) {
         memcpy(pass->head + (u64) block * BLOCK_SIZE, data, BLOCK_SIZE);
     } else if (block >= HEAD_BLOCKS && pass->head == NULL) {
-        return write_sectors(pass->dev, (u64) block * (BLOCK_SIZE / 512), data, BLOCK_SIZE);
+        return write_sectors(pass->dev, (u64) block * (BLOCK_SIZE / VBLK_SECTOR_SIZE), data, BLOCK_SIZE);
     }
     return 0;
 }
@@ -197,7 +196,7 @@ static void put_dir_inode(u8 *inode, const u32 mode, const u32 links, const u32 
     put32(inode, I_CTIME, now);
     put32(inode, I_MTIME, now);
     put16(inode, I_LINKS_COUNT, links);
-    put32(inode, I_BLOCKS, count * (BLOCK_SIZE / 512));
+    put32(inode, I_BLOCKS, count * (BLOCK_SIZE / EXT2_I_BLOCK_SIZE));
     for (u32 i = 0; i < count; i++) {
         put32(inode, I_BLOCK + 4 * i, first + i);
     }
@@ -228,7 +227,7 @@ static void put_super(u8 *sb, const struct layout *l, const char *label, const u
     put32(sb, S_R_BLOCKS_COUNT, l->blocks / 20);
     put32(sb, S_FREE_BLOCKS_COUNT, free_blocks);
     put32(sb, S_FREE_INODES_COUNT, l->groups * l->inodes_per_group - FIRST_INO);
-    put32(sb, S_FIRST_DATA_BLOCK, 1);
+    put32(sb, S_FIRST_DATA_BLOCK, FIRST_DATA_BLOCK);
     put32(sb, S_BLOCKS_PER_GROUP, BLOCKS_PER_GROUP);
     put32(sb, S_FRAGS_PER_GROUP, BLOCKS_PER_GROUP);
     put32(sb, S_INODES_PER_GROUP, l->inodes_per_group);
@@ -290,10 +289,10 @@ static int write_groups(const struct pass *dev, const struct layout *l, u8 *gdt,
                 put32(buf, I_ATIME, now);
                 put32(buf, I_CTIME, now);
                 put32(buf, I_MTIME, now);
-                put_dir_inode(buf + (ROOT_INODE - 1) * INODE_SIZE, DIR_MODE_0755, 3, root_block, 1, now);
+                put_dir_inode(buf + (ROOT_INODE - 1) * INODE_SIZE, EXT2_S_IFDIR | 0755, 3, root_block, 1, now);
             }
             if (group == 0 && i == (LOST_FOUND_INO - 1) / INODES_PER_BLOCK) {
-                put_dir_inode(buf + (LOST_FOUND_INO - 1) % INODES_PER_BLOCK * INODE_SIZE, DIR_MODE_0700, 2,
+                put_dir_inode(buf + (LOST_FOUND_INO - 1) % INODES_PER_BLOCK * INODE_SIZE, EXT2_S_IFDIR | 0700, 2,
                     root_block + 1, LOST_FOUND_BLOCKS, now);
             }
             if ((result = write_block(dev, inode_table + i, buf)) != 0) {

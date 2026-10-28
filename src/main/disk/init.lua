@@ -91,7 +91,7 @@ local function absolute(path)
   return path
 end
 
-for _, name in ipairs({"list", "stat", "exists", "mkdir", "remove", "info", "format", "label", "openRaw", "unmount"}) do
+for _, name in ipairs({"list", "stat", "exists", "mkdir", "remove", "info", "format", "label", "openRaw", "mount", "unmount"}) do
   local f = fs[name]
   fs[name] = function(path, ...)
     return f(absolute(path), ...)
@@ -102,6 +102,21 @@ function fs.rename(from, to)
   return rename(absolute(from), absolute(to))
 end
 os.remove, os.rename = fs.remove, fs.rename
+
+local function isDevice(path)
+  return type(path) == "string" and path:find("/dev", 1, true)
+    and (" stdin stdout stderr tty console dev . .. "):find(" " .. path:match("([^/]*)/*$") .. " ", 1, true)
+end
+
+for _, name in ipairs({"list", "stat", "exists"}) do
+  local f = fs[name]
+  fs[name] = function(path)
+    if isDevice(absolute(path)) then
+      return require("streams")[name](f, absolute(path))
+    end
+    return f(path)
+  end
+end
 
 local kernelLoadfile = loadfile
 function loadfile(path, ...)
@@ -121,8 +136,7 @@ function fileMethods:setvbuf()
 end
 
 local kernelOpen, kernelLines, kernelType = io.open, io.lines, io.type
--- The io streams are one record, which system.streams(record) swaps, e.g. for each pipeline stage.
-local streams = {input = term.stream, output = term.stream} -- errors: nil for the console
+local streams = {input = term.stream, output = term.stream}
 function system.streams(record)
   local active = streams
   streams = record or streams
@@ -139,8 +153,19 @@ setmetatable(io, {__index = function(_, key)
   end
 end})
 
+local function openStream(path, mode)
+  if isDevice(path) then
+    return require("streams").open(path, mode, streams)
+  end
+end
+
 function io.open(path, mode)
-  return kernelOpen(absolute(path), mode)
+  path = absolute(path)
+  local stream, reason = openStream(path, mode)
+  if stream ~= nil then
+    return stream or nil, reason
+  end
+  return kernelOpen(path, mode)
 end
 
 local function openIfPath(file, mode)
@@ -164,7 +189,12 @@ function io.lines(path, ...)
   if path == nil then
     return streams.input:lines(...)
   end
-  return kernelLines(absolute(path), ...)
+  path = absolute(path)
+  local stream, reason = openStream(path, "r")
+  if stream ~= nil then
+    return assert(stream, reason):lines(...)
+  end
+  return kernelLines(path, ...)
 end
 
 function io.read(...)
@@ -186,6 +216,8 @@ end
 function io.type(file)
   if file == term.stream or (type(file) == "table" and file.pipe) then
     return "file"
+  elseif type(file) == "table" and file.stream then
+    return io.type(file.stream)
   end
   return kernelType(file)
 end

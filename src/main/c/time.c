@@ -2,14 +2,13 @@
 #include "drivers/rtc.h"
 #include "internal.h"
 
-#define SIE_STIE (1ul << 5)
 #define SBI_EXT_TIME 0x54494D45
 
 static interrupt_handler watchdog_handler;
 static u64 watchdog_period; /* in ticks, 0 when off */
 static volatile u64 watchdog_deadline; /* 0 while waiting or off */
-static volatile int woken; /* ends the current wait_until() early */
-static volatile u64 input_timing; /* see entropy_add */
+static volatile int woken;
+static volatile u64 input_timing;
 
 static void sbi_set_timer(const u64 value) {
     register u64 a0 asm("a0") = value;
@@ -19,7 +18,7 @@ static void sbi_set_timer(const u64 value) {
 }
 
 void time_init(void) {
-    csr_set(sie, SIE_STIE);
+    csr_set(sie, 1ul << IRQ_S_TIMER);
     sbi_set_timer(TIME_NEVER);
 }
 
@@ -63,6 +62,14 @@ u64 mix64(u64 x) {
 
 u64 time_frequency(void) {
     return board.timebase;
+}
+
+u64 seconds_to_ticks(const double seconds) {
+    const double ticks = seconds * (double) time_frequency();
+    if (!(ticks > 0)) {
+        return 0;
+    }
+    return ticks >= 0x1p62 ? 1ull << 62 : (u64) ticks;
 }
 
 static void arm_watchdog(void) {
@@ -109,4 +116,38 @@ void watchdog_set(const u64 period, const interrupt_handler handler) {
 
 void watchdog_restart(void) {
     arm_watchdog();
+}
+
+/* days_from_civil and civil_from_time follow Howard Hinnant's public domain date algorithms. */
+long days_from_civil(long y, const long m, const long d) {
+    y -= m <= 2;
+    const long era = (y >= 0 ? y : y - 399) / 400;
+    const long yoe = y - era * 400;
+    const long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+void civil_from_time(const long t, struct date *out) {
+    long days = t / 86400;
+    long rest = t % 86400;
+    if (rest < 0) {
+        rest += 86400;
+        days--;
+    }
+    out->hour = rest / 3600;
+    out->min = rest / 60 % 60;
+    out->sec = rest % 60;
+    out->wday = ((days % 7) + 11) % 7 + 1; /* 1970-01-01 was a Thursday; Sunday is 1 */
+
+    const long z = days + 719468;
+    const long era = (z >= 0 ? z : z - 146096) / 146097;
+    const long doe = z - era * 146097;
+    const long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const long mp = (5 * doy + 2) / 153;
+    out->day = doy - (153 * mp + 2) / 5 + 1;
+    out->month = mp < 10 ? mp + 3 : mp - 9;
+    out->year = yoe + era * 400 + (out->month <= 2);
+    out->yday = days - days_from_civil(out->year, 1, 1) + 1;
 }

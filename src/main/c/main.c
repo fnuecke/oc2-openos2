@@ -25,10 +25,6 @@ static u64 pte(const u64 physical, const u64 flags) {
     return (physical >> 12) << 10 | flags;
 }
 
-/*
- * Replaces the boot mapping of the kernel's gigapage with megapages, and the kernel's megapage
- * with 4 KiB pages, leaving the pages below the stack unmapped. An overflow then faults.
- */
 static void kernel_paging(void) {
     const u64 gigapage = 0x80000000ull;
     const u64 kernel = virt_to_phys(_image_start) & ~(MEGAPAGE - 1);
@@ -47,7 +43,6 @@ static void kernel_paging(void) {
     asm volatile("sfence.vma" ::: "memory");
 }
 
-/* A known byte below the current stack, so stack_usage() can find the high-water mark. */
 static void fill_stack(void) {
     u8 *sp;
     asm volatile("mv %0, sp" : "=r"(sp));
@@ -57,7 +52,6 @@ static void fill_stack(void) {
 #define MAPPED_RAM_START 0x80000000ull /* see boot.c */
 #define MAPPED_RAM_END 0x100000000ull
 
-/* Use all RAM that's not firmware, kernel or device tree as heap. */
 static void add_region(const u64 start, const u64 end) {
     const u64 excluded[3][2] = { /* physical, by address */
         {board.reserved_base, board.reserved_base + board.reserved_size},

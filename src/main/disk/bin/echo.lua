@@ -2,7 +2,8 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: echo [-n] [word...]
-Prints the words. -n leaves out the newline at the end.
+Prints the words.
+  -n  leave out the newline at the end
 ]]
 
 local args, options = shell.parse(...)

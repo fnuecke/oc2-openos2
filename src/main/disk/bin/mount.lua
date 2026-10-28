@@ -1,20 +1,30 @@
+local medium = require("medium")
 local shell = require("shell")
 
 local USAGE = [[
-Usage: mount
-Lists the mounted file systems and their drives. Media are mounted when they
-are inserted, at /mnt/<label> or /mnt/<drive number>, see label -h. The
-built-in file system is at /mnt/builtin.
+Usage: mount [device]
+Lists the mounts, or attaches a drive detached by umount, e.g. /dev/vdb.
 ]]
 
-local _, options = shell.parse(...)
+local args, options = shell.parse(...)
 local invalid = shell.check(options, USAGE)
 if invalid then
   return invalid
 end
+if #args > 1 then
+  return shell.usage(USAGE)
+end
+if args[1] then
+  local ok, reason = fs.mount(shell.resolve(args[1]))
+  if not ok then
+    io.stderr:write("mount: ", args[1], ": ", reason, "\n")
+    return 1
+  end
+  return
+end
 for _, mount in ipairs(fs.mounts()) do
-  local medium = mount.medium == "blank" and ", not formatted"
-    or (mount.medium == "ext2" or mount.medium == "9p") and "" or ", " .. mount.medium
-  print(mount.path .. (mount.index and " on drive " .. mount.index or "") .. " ("
-    .. (mount.readOnly and "ro" or "rw") .. medium .. ")")
+  local usable = mount.medium == "ext2" or mount.medium == "9p"
+  local other = mount.medium == "blank" and ", not formatted" or not usable and ", " .. mount.medium or ""
+  print((mount.index and medium.device(mount.index) or mount.label) .. " on " .. mount.path
+    .. (usable and " type " .. mount.medium or "") .. " (" .. (mount.readOnly and "ro" or "rw") .. other .. ")")
 end

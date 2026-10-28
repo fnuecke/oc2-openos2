@@ -1,6 +1,3 @@
--- For programs that overwrite whole media, format and dd: finds the drive mounted at a path,
--- describes it, and asks before its data is lost.
-
 local medium = {}
 
 local KINDS = {
@@ -9,14 +6,25 @@ local KINDS = {
   unknown = "unknown data",
 }
 
+function medium.device(index)
+  return "/dev/vd" .. string.char(string.byte("a") + index)
+end
+
 function medium.find(path, reading)
   if path == "/" and not reading then
     return nil, "Is the boot medium"
   end
-  for _, mount in ipairs(fs.mounts()) do
-    if mount.path == path and mount.index then
+  local device = path:match("^/dev/vd%l$")
+  for _, mount in ipairs(fs.mounts(true)) do
+    if mount.index and (mount.path == path and not mount.unmounted or device and medium.device(mount.index) == path) then
+      if mount.path == "/" and not reading then
+        return nil, "Is the boot medium"
+      end
       return mount
     end
+  end
+  if device then
+    return nil, select(2, fs.info(path))
   end
   return nil, "Not the mount point of a drive"
 end
@@ -41,14 +49,16 @@ function medium.check(mount, force)
 end
 
 function medium.confirm(mount)
-  print(string.format("%s: drive %d, %d KiB, %s", mount.path, mount.index, mount.size // 1024, contents(mount)))
-  io.write("all data on ", mount.path, " will be lost, continue? [y/N] ")
+  local device = medium.device(mount.index)
+  print(string.format("%s: %d KiB, %s, %s", device, mount.size // 1024, contents(mount),
+    mount.unmounted and "not mounted" or "mounted at " .. mount.path))
+  io.write("all data on ", device, " will be lost, continue? [y/N] ")
   local answer = io.read()
   return answer ~= nil and answer:match("^[yY]") ~= nil
 end
 
 function medium.mountPoints()
-  local points = {}
+  local points = {["/dev"] = true, ["/sys"] = true}
   for _, mount in ipairs(fs.mounts()) do
     points[mount.path] = true
   end

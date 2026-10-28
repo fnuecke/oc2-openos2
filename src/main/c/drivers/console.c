@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/*
- * The 16550 UART console. Its receive interrupt comes through the PLIC.
- */
+/* The 16550 UART console. Its receive interrupt comes through the PLIC. */
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -17,7 +15,7 @@ static char rx[RX_SIZE];
 static volatile u32 head, tail; /* interrupt handler writes head, console_read tail */
 
 static interrupt_handler console_handler;
-static volatile u32 interrupts; /* Ctrl+C presses */
+static volatile u32 interrupts;
 static volatile int flush_pending;
 static volatile u32 flush_until; /* input before this was typed ahead of a Ctrl+C */
 

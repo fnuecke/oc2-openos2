@@ -3,8 +3,9 @@ local transfer = require("transfer")
 
 local USAGE = [[
 Usage: rm [-r] [-f] <path>...
-Removes files, or with -r directories and their contents. -f ignores missing
-paths.
+Removes files.
+  -r  remove directories and their contents
+  -f  ignore missing paths
 ]]
 
 local args, options = shell.parse(...)

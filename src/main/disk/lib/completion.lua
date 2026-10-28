@@ -1,7 +1,5 @@
--- Tab completion for the shell, loaded on the first Tab. The first word of a command completes
--- to builtins, aliases and programs, later words to paths. A command can complete its arguments
--- itself with /lib/completion/<command>.lua, which returns function(args, word) -> candidates,
--- like bash's complete -F.
+-- A command can complete its arguments itself with /lib/completion/<command>.lua, which returns
+-- function(args, word) -> candidates, like bash's complete -F.
 
 local shell = require("shell")
 local term = require("term")

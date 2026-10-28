@@ -4,8 +4,6 @@
 
 #include "kernel.h"
 
-/* ext2 at /, /mnt/<label> and /mnt/<device index>, 9p at /mnt/<mount tag>, a read-only /sys */
-
 /* ---------------------------------------------------------------------------------------- */
 /* Errors, flags and types */
 
@@ -25,6 +23,7 @@
 #define FS_UNSUPPORTED (-15)
 #define FS_IS_ROOT (-16)
 #define FS_NOT_BLANK (-17)
+#define FS_NO_MEDIUM (-19)
 
 #define O_READ 1
 #define O_WRITE 2
@@ -33,12 +32,14 @@
 #define O_APPEND 16
 
 #define FS_PATH_LENGTH 512
+#define FS_MOUNT_PATH_LENGTH 48
 #define FS_LABEL_LENGTH 16
 
 struct fs_stat {
     u64 size;
     u32 mtime;
     bool is_dir;
+    bool is_device; /* in /dev, size 0 */
 };
 
 /* Directory entries collected by fs_list: per entry a byte is_dir, a byte name length, the name. */
@@ -63,10 +64,10 @@ struct fs_mount {
     const char *label; /* "" if none; for 9p the mount tag */
     int index; /* of the block device, -1 for 9p */
     int medium; /* FS_MEDIUM_* */
-    u32 serial; /* new for every mount, also when the same medium is mounted again (e.g. a floppy
-                 * reinserted), so a serial taken before a confirmation fails after any remount */
+    u32 serial; /* new for every mount, so a serial taken before a confirmation fails after any remount */
     u64 total, free; /* in bytes */
     bool writable;
+    bool unmounted; /* detached by fs_unmount */
 };
 
 const char *fs_error(int code);
@@ -77,9 +78,12 @@ void fs_mounts(void (*fn)(void *ctx, const struct fs_mount *mount), void *ctx);
 void fs_unmount_all(void);
 /*
  * Detaches the drive mounted at `path`: marks its file system clean and stops using the medium
- * until it is changed. Fails like fs_format for / and while files are open on it.
+ * until it changes or fs_mount attaches it. Fails like fs_format for / and while files are open on it.
+ * A detached drive only allows raw access, at /mnt/<device index> or /dev/vd<x>.
  */
 int fs_unmount(const char *path, u32 serial);
+/* Attaches a drive detached by fs_unmount again, FS_BUSY if it is attached. */
+int fs_mount(const char *path);
 /* Looks for medium changes. Every file system call also does. */
 void fs_poll_media(void);
 /*
@@ -126,9 +130,9 @@ int fs_remove(const char *path);
  * Writes a new, empty ext2 file system on the medium mounted at `path`, which must be a mount point
  * other than / (FS_IS_ROOT) without open files. A NULL label keeps the current one, "" clears it.
  * Media that are not FS_MEDIUM_BLANK, and ext2 mounted read-only for its features, are only
- * overwritten with `force` (else FS_NOT_BLANK or FS_READ_ONLY). A `serial`
- * other than 0 must be the mount's, see struct fs_mount, or this fails with FS_CHANGED. Afterwards
- * the medium is mounted again, at /mnt/<label> if the label allows, see fs_set_label.
+ * overwritten with `force` (else FS_NOT_BLANK or FS_READ_ONLY). A `serial` other than 0 must be
+ * the mount's, or this fails with FS_CHANGED. Afterwards the medium is mounted again, at
+ * /mnt/<label> if the label allows, see fs_set_label.
  */
 int fs_format(const char *path, const char *label, bool force, u32 serial);
 /*

@@ -4,9 +4,7 @@ local term = require("term")
 
 local USAGE = [[
 Usage: less [file]
-Shows a file, or the input, one screen at a time. Space and Page Down go a
-screen down, b and Page Up a screen up, Enter and the arrow keys a line, g and
-G to the start and end, q quits.
+Shows a file, or the input, one screen at a time. q quits.
 ]]
 
 local args, options = shell.parse(...)

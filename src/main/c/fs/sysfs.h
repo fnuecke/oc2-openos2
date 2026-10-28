@@ -5,6 +5,8 @@
 
 #include "vfs.h"
 
+#define SYSFS_MAX_FILES 4
+
 typedef int sysfs_fd;
 
 int sysfs_port(const char *name, size_t len);

@@ -2,7 +2,7 @@ local shell = require("shell")
 
 local USAGE = [[
 Usage: cat [file...]
-Prints the files, or the input if there are none or a file is "-".
+Prints the files, or the input.
 ]]
 
 local args, options = shell.parse(...)
