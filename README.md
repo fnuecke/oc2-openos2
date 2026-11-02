@@ -14,4 +14,4 @@ Gradle builds the toolchain container from the `Dockerfile` and runs `cargo xtas
 
 Clone with `--recursive`, or run `git submodule update --init` after cloning. Lua, lua-cjson and TLSF are submodules in `external/`.
 
-The kernel needs a firmware that loads it at the `text_offset` in its Image header, 64 KiB above RAM base. This means Sedna's firmware from `sedna-buildroot` (`boot/sedna-fw`) can also load the OpenOS II kernel.
+The kernel needs a firmware that loads it at the `text_offset` in its Image header, 64 KiB above RAM base. This means Sedna's firmware from [`sedna-buildroot`](https://github.com/fnuecke/buildroot) can also load the OpenOS II kernel.

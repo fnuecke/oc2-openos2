@@ -40,6 +40,7 @@ impl Signal {
                 Self { name: c"port".as_ptr(), value: name, value_length: length, ..Self::NONE }
             }
             Event::Serial(path) => Self::new(c"serial", path.as_bytes()),
+            Event::Sound(path) => Self::new(c"sound", path.as_bytes()),
             Event::Power(Request::PowerOff) => Self { name: c"shutdown".as_ptr(), ..Self::NONE },
             Event::Power(Request::Reboot) => Self { name: c"reboot".as_ptr(), ..Self::NONE },
         }

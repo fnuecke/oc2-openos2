@@ -4,6 +4,7 @@ use crate::arch::KernelCell;
 use crate::drivers::uart;
 use crate::drivers::virtio::blk;
 use crate::drivers::virtio::console as vcon;
+use crate::drivers::virtio::snd;
 use crate::fs::MountText;
 use crate::fs::vfs::{self, Change};
 use crate::power::{self, Request};
@@ -14,6 +15,7 @@ pub enum Event {
     Medium(MountText, Change),
     Port(vcon::Vport),
     Serial(Text<16>),
+    Sound(Text<16>),
     Power(Request),
 }
 
@@ -37,7 +39,8 @@ pub fn next() -> Option<Event> {
             s.stage = match s.stage {
                 Stage::Medium => Stage::Port,
                 Stage::Port => Stage::Serial,
-                Stage::Serial => Stage::Power,
+                Stage::Serial => Stage::Sound,
+                Stage::Sound => Stage::Power,
                 Stage::Power | Stage::Done => Stage::Done,
             };
         }
@@ -50,6 +53,7 @@ fn pending() -> bool {
         || (0..blk::count()).filter_map(blk::get).any(blk::Disk::change_pending)
         || vcon::signal_ready()
         || uart::signal_ready()
+        || snd::signal_ready()
         || (power::requested().is_some() && !STATE.with(|s| s.power_signaled))
 }
 
@@ -59,6 +63,7 @@ enum Stage {
     Medium,
     Port,
     Serial,
+    Sound,
     Power,
 }
 
@@ -79,6 +84,11 @@ impl State {
                 let mut path = Text::of(b"/dev/");
                 path.push(uart::name(uart::take_signal()?)?.as_bytes());
                 Some(Event::Serial(path))
+            }
+            Stage::Sound => {
+                let mut path = Text::of(b"/dev/");
+                path.push(snd::take_signal()?.as_bytes());
+                Some(Event::Sound(path))
             }
             Stage::Power => {
                 let request = power::requested().filter(|_| !self.power_signaled)?;

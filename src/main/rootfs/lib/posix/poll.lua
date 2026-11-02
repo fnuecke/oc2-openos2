@@ -4,8 +4,10 @@ local BLOCKED = require("system").BLOCKED
 
 local poll = {}
 
+local wake_events = {port = true, serial = true, sound = true, bus = true}
+
 local function wakes(name)
-  return name == "port" or name == "serial" or name == "bus"
+  return wake_events[name]
 end
 
 local function inThread()

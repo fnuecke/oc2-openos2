@@ -12,6 +12,18 @@ pub const DRIVER: Driver = Driver { id: 25, probe, keeps_config_change: false };
 
 pub struct Dsp;
 
+pub fn signal_ready() -> bool {
+    STATE.with(State::signal_due)
+}
+
+pub fn take_signal() -> Option<Name> {
+    STATE.with(|state| {
+        let stream = state.signal_due().then_some(state.stream.as_mut()).flatten()?;
+        stream.blocked = false;
+        Some(Name::of(stream.name))
+    })
+}
+
 impl devfs::Device for Dsp {
     fn count(&self) -> usize {
         if STATE.with(|state| state.device.is_some()) { FORMATS.len() } else { 0 }
@@ -49,6 +61,7 @@ impl devfs::Device for Dsp {
             }
             let deadline = time_now() + PERIODS as u64 * period_ticks() + frequency();
             let error = if nonblocking {
+                STATE.with(State::block);
                 Error::Again
             } else if app_wait(|| STATE.with(State::writable), deadline) {
                 continue;
@@ -62,7 +75,11 @@ impl devfs::Device for Dsp {
     }
 
     fn poll(&self, _: usize) -> Poll {
-        Poll { readable: false, writable: STATE.with(State::writable) }
+        let writable = STATE.with(State::writable);
+        if !writable {
+            STATE.with(State::block);
+        }
+        Poll { readable: false, writable }
     }
 
     fn close(&self, _: usize) -> Result<()> {
@@ -172,11 +189,13 @@ impl Request {
 }
 
 struct Stream {
+    name: &'static [u8],
     slots: HeapBuf,
     period: usize,
     silence: u8,
     nonblocking: bool,
     readable: bool,
+    blocked: bool,
     started: bool,
     head: usize,
     queued: usize,
@@ -236,11 +255,13 @@ impl State {
         self.control(SET_PARAMS_SIZE)?;
         self.command(R_PCM_PREPARE)?;
         self.stream = Some(Stream {
+            name: format.name,
             slots,
             period,
             silence: format.silence,
             nonblocking: flags.has(OpenFlags::NONBLOCK),
             readable: flags.has(OpenFlags::READ),
+            blocked: false,
             started: false,
             head: 0,
             queued: 0,
@@ -337,6 +358,16 @@ impl State {
                 stream.queued = stream.queued.saturating_sub(1);
                 stream.head = (stream.head + 1) % PERIODS;
             }
+        }
+    }
+
+    fn signal_due(&mut self) -> bool {
+        self.stream.as_ref().is_some_and(|s| s.blocked) && self.writable()
+    }
+
+    fn block(&mut self) {
+        if let Some(stream) = &mut self.stream {
+            stream.blocked = true;
         }
     }
 
