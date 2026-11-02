@@ -1,0 +1,5 @@
+# Keep version in sync with Dockerfile.
+[toolchain]
+channel = "1.94.0"
+components = ["clippy", "rust-src", "rustfmt"]
+targets = ["riscv64gc-unknown-none-elf"]

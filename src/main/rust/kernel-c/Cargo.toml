@@ -1,0 +1,16 @@
+[package]
+name = "kernel-c"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+test = false
+doctest = false
+bench = false
+
+[dependencies]
+kernel = { path = ".." }

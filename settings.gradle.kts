@@ -1,1 +1,1 @@
-rootProject.name = "oc2-os"
+rootProject.name = "oc-openos2"

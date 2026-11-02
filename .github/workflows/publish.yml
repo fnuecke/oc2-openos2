@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out oc2-os
+      - name: Check out oc-openos2
         uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -77,7 +77,7 @@ jobs:
             echo "Nothing to publish."
             exit 0
           fi
-          git commit -m "oc2-os $VERSION"
+          git commit -m "oc-openos2 $VERSION"
           for attempt in 1 2 3 4 5; do
             if git push; then
               exit 0

@@ -4,7 +4,7 @@ plugins {
 }
 
 val semver = providers.gradleProperty("semver").get()
-val toolchainImage = "oc2-os-toolchain:1"
+val toolchainImage = "oc-openos2-toolchain:4"
 
 version = semver
 group = "li.cil.oc2"
@@ -33,10 +33,13 @@ val compileOs = tasks.register<Exec>("compileOs") {
     dependsOn(buildToolchainImage)
 
     inputs.file(toolchainId)
-    inputs.file("Makefile")
+    inputs.dir(".cargo")
+    inputs.files(fileTree("xtask") { exclude("target") })
+    inputs.dir("examples")
     inputs.file("mkdisk.sh")
     inputs.dir("src/main/c")
-    inputs.dir("src/main/disk")
+    inputs.files(fileTree("src/main/rust") { exclude("target") })
+    inputs.dir("src/main/rootfs")
     inputs.dir(luaSources)
     inputs.dir(cjsonSources)
     inputs.dir(tlsfSources)
@@ -59,7 +62,7 @@ val compileOs = tasks.register<Exec>("compileOs") {
         "-u", "$uid:$gid",
         "-v", "${projectDir}:/build",
         "-w", "/build",
-        toolchainImage, "make",
+        toolchainImage, "cargo", "xtask",
     )
 }
 
@@ -67,11 +70,11 @@ tasks.processResources {
     dependsOn(compileOs)
     from(outputDir) {
         include("disk.img")
-        into("generated/oc2-os")
+        into("generated/oc-openos2")
     }
     from(layout.projectDirectory) {
         include("LICENSE", "NOTICES")
-        into("licenses/oc2-os")
+        into("licenses/oc-openos2")
     }
 }
 
@@ -91,11 +94,11 @@ publishing {
                 name = "OpenOS II"
                 description =
                     "Lua based operating system for OpenComputers II's RISC-V computers."
-                url = "https://github.com/fnuecke/oc2-os"
+                url = "https://github.com/fnuecke/oc-openos2"
                 licenses {
                     license {
                         name = "MIT License"
-                        url = "https://github.com/fnuecke/oc2-os/blob/main/LICENSE"
+                        url = "https://github.com/fnuecke/oc-openos2/blob/main/LICENSE"
                     }
                 }
                 developers {

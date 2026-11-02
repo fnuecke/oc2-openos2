@@ -21,7 +21,7 @@ staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
 
 for dir in "$@"; do
-    cp -R "$dir"/. "$staging"/
+    cp -R --preserve=links "$dir"/. "$staging"/
 done
 mkdir -p "$staging/boot" "$staging/mnt"
 cp "$image" "$staging/boot/Image"

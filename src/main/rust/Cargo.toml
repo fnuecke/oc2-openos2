@@ -1,0 +1,28 @@
+[workspace]
+members = ["kernel-c", "openos2"]
+default-members = [".", "kernel-c", "openos2"]
+
+[package]
+name = "kernel"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+links = "kernel"
+
+[lib]
+path = "src/lib.rs"
+test = false
+doctest = false
+bench = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = false
+
+[profile.dev]
+panic = "abort"

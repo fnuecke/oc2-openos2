@@ -1,0 +1,16 @@
+[package]
+name = "openos2"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "openos2"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
+
+[dependencies]
+kernel = { path = ".." }
