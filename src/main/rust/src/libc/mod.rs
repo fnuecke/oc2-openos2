@@ -13,7 +13,9 @@ use core::ffi::{c_char, c_int, c_long, c_void};
 
 const EPERM: c_int = 1;
 const ENOENT: c_int = 2;
+const EINTR: c_int = 4;
 const EIO: c_int = 5;
+const ENXIO: c_int = 6;
 const EBADF: c_int = 9;
 const EAGAIN: c_int = 11;
 const ENOMEM: c_int = 12;
@@ -140,7 +142,9 @@ extern "C" fn strerror(code: c_int) -> *mut c_char {
         0 => c"No error information",
         EPERM => c"Operation not permitted",
         ENOENT => c"No such file or directory",
+        EINTR => c"Interrupted system call",
         EIO => c"Input/output error",
+        ENXIO => c"No such device or address",
         EBADF => c"Bad file descriptor",
         EAGAIN => c"Resource temporarily unavailable",
         ENOMEM => c"Out of memory",

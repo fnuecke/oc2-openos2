@@ -11,6 +11,7 @@ use crate::arch::KernelCell;
 use crate::drivers::fb::Framebuffers;
 use crate::drivers::uart::Ttys;
 use crate::drivers::virtio::console::Ports;
+use crate::drivers::virtio::snd::Dsp;
 use core::ffi::c_int;
 use disk::Disks;
 use memory::Memory;
@@ -128,7 +129,7 @@ impl FileSystem for Devfs {
     }
 }
 
-const DEVICES: &[&dyn Device] = &[&Memory, &Disks, &Ttys, &Ports, &Framebuffers];
+const DEVICES: &[&dyn Device] = &[&Memory, &Disks, &Ttys, &Ports, &Framebuffers, &Dsp];
 static FILES: KernelCell<[Option<File>; MAX_FILES]> = KernelCell::new([None; MAX_FILES]);
 
 fn lookup(path: &[u8]) -> Result<Option<(usize, usize)>> {

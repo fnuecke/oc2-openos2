@@ -6,7 +6,9 @@
 pub enum Error {
     NotPermitted = -1,  // EPERM
     NotFound = -2,      // ENOENT
+    Interrupted = -4,   // EINTR
     Io = -5,            // EIO
+    NoAddress = -6,     // ENXIO
     BadFd = -9,         // EBADF
     Again = -11,        // EAGAIN
     Denied = -13,       // EACCES
@@ -32,10 +34,12 @@ pub enum Error {
 }
 
 impl Error {
-    const ALL: [Error; 25] = [
+    const ALL: [Error; 27] = [
         Error::NotPermitted,
         Error::NotFound,
+        Error::Interrupted,
         Error::Io,
+        Error::NoAddress,
         Error::BadFd,
         Error::Again,
         Error::Denied,

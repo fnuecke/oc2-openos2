@@ -4,6 +4,7 @@
 
 pub mod blk;
 pub mod console;
+pub mod snd;
 
 use super::plic::HandlerData;
 use super::{VIRTIO_DRIVERS, plic};
