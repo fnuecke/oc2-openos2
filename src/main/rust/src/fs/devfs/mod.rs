@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: MIT
-//! /dev, with Linux names. Implementations of Device are listed in DEVICES:
-//!
-//!   null, zero, random, urandom   see memory
-//!   vda, vdb, ...                 the whole medium of each block device, see disk
-//!   ttyS0, ttyS1, ...             16550 UARTs, ttyS0 is the console, see drivers::uart
-//!   vport0p<n>, <name>            named virtio-console ports, listed by number, see drivers::virtio::console
 
 mod disk;
 mod memory;
@@ -14,6 +8,7 @@ pub use disk::disk;
 use super::vfs::{BackendFd, FileSystem, MountId};
 use super::{Error, Kind, Listing, Name, OpenFlags, Result, Stat, trim_slashes};
 use crate::arch::KernelCell;
+use crate::drivers::fb::Framebuffers;
 use crate::drivers::uart::Ttys;
 use crate::drivers::virtio::console::Ports;
 use core::ffi::c_int;
@@ -133,7 +128,7 @@ impl FileSystem for Devfs {
     }
 }
 
-const DEVICES: &[&dyn Device] = &[&Memory, &Disks, &Ttys, &Ports];
+const DEVICES: &[&dyn Device] = &[&Memory, &Disks, &Ttys, &Ports, &Framebuffers];
 static FILES: KernelCell<[Option<File>; MAX_FILES]> = KernelCell::new([None; MAX_FILES]);
 
 fn lookup(path: &[u8]) -> Result<Option<(usize, usize)>> {

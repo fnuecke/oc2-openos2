@@ -27,6 +27,7 @@ const ENOTDIR: c_int = 20;
 const EISDIR: c_int = 21;
 const EINVAL: c_int = 22;
 const EMFILE: c_int = 24;
+const EFBIG: c_int = 27;
 const ENOSPC: c_int = 28;
 const ESPIPE: c_int = 29;
 const EROFS: c_int = 30;
@@ -153,6 +154,7 @@ extern "C" fn strerror(code: c_int) -> *mut c_char {
         EISDIR => c"Is a directory",
         EINVAL => c"Invalid argument",
         EMFILE => c"Too many open files",
+        EFBIG => c"File too large",
         ENOSPC => c"No space left on device",
         ESPIPE => c"Illegal seek",
         EROFS => c"Read-only file system",

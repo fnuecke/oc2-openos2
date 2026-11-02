@@ -170,7 +170,7 @@ pub fn seek(pos: u64, offset: i64, whence: c_int, size: impl FnOnce() -> Result<
         SEEK_END => size()?,
         _ => return Err(Error::Invalid),
     };
-    base.checked_add_signed(offset).ok_or(Error::Invalid)
+    base.checked_add_signed(offset).filter(|&p| p <= i64::MAX as u64).ok_or(Error::Invalid)
 }
 
 fn grow<T>(buffer: &mut *mut T, capacity: &mut usize, count: usize, step: usize) -> Result<()> {

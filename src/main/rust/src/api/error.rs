@@ -19,6 +19,7 @@ pub enum Error {
     IsDir = -21,        // EISDIR
     Invalid = -22,      // EINVAL
     TooMany = -24,      // EMFILE
+    FileTooBig = -27,   // EFBIG
     NoSpace = -28,      // ENOSPC
     ReadOnly = -30,     // EROFS
     TooManyLinks = -31, // EMLINK
@@ -31,7 +32,7 @@ pub enum Error {
 }
 
 impl Error {
-    const ALL: [Error; 24] = [
+    const ALL: [Error; 25] = [
         Error::NotPermitted,
         Error::NotFound,
         Error::Io,
@@ -47,6 +48,7 @@ impl Error {
         Error::IsDir,
         Error::Invalid,
         Error::TooMany,
+        Error::FileTooBig,
         Error::NoSpace,
         Error::ReadOnly,
         Error::TooManyLinks,
