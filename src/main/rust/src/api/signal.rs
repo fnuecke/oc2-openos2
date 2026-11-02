@@ -14,11 +14,19 @@ pub struct Signal {
     value: *const c_char,
     value_length: usize,
     detail: *const c_char, // NUL-terminated
+    int_values: [i64; 2],
+    int_value_count: usize,
 }
 
 impl Signal {
-    const NONE: Self =
-        Self { name: core::ptr::null(), value: core::ptr::null(), value_length: 0, detail: core::ptr::null() };
+    const NONE: Self = Self {
+        name: core::ptr::null(),
+        value: core::ptr::null(),
+        value_length: 0,
+        detail: core::ptr::null(),
+        int_values: [0; 2],
+        int_value_count: 0,
+    };
 
     fn new(name: &'static CStr, value: &[u8]) -> Self {
         Self { name: name.as_ptr(), value: value.as_ptr().cast(), value_length: value.len(), ..Self::NONE }
@@ -41,6 +49,11 @@ impl Signal {
             }
             Event::Serial(path) => Self::new(c"serial", path.as_bytes()),
             Event::Sound(path) => Self::new(c"sound", path.as_bytes()),
+            Event::Key(key) => Self {
+                int_values: [key.ch as i64, key.code as i64],
+                int_value_count: 2,
+                ..Self::new(if key.down { c"key_down" } else { c"key_up" }, key.keyboard.as_bytes())
+            },
             Event::Power(Request::PowerOff) => Self { name: c"shutdown".as_ptr(), ..Self::NONE },
             Event::Power(Request::Reboot) => Self { name: c"reboot".as_ptr(), ..Self::NONE },
         }

@@ -5,7 +5,7 @@ use crate::arch::{KernelCell, time_now};
 use crate::mem::HeapBox;
 use crate::time::{frequency, wait};
 
-pub const DRIVER: Driver = Driver { id: 2, probe, keeps_config_change: true };
+pub const DRIVER: Driver = Driver { id: 2, probe, keeps_config_change: true, interrupt_hook: None };
 pub const SECTOR_SIZE: usize = 512;
 pub const MAX_DISKS: usize = 16;
 

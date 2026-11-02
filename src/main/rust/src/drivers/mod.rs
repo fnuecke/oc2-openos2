@@ -18,8 +18,13 @@ pub struct Driver {
     pub probe: fn(&Node),
 }
 
-pub(crate) const VIRTIO_DRIVERS: &[&virtio::Driver] =
-    &[&virtio::blk::DRIVER, &virtio::console::DRIVER, &virtio::snd::DRIVER, &crate::fs::p9::DRIVER];
+pub(crate) const VIRTIO_DRIVERS: &[&virtio::Driver] = &[
+    &virtio::blk::DRIVER,
+    &virtio::console::DRIVER,
+    &virtio::input::DRIVER,
+    &virtio::snd::DRIVER,
+    &crate::fs::p9::DRIVER,
+];
 
 const DRIVERS: &[&Driver] =
     &[&uart::DRIVER, &rtc::DRIVER, &fb::DRIVER, &syscon::DRIVER, &syscon::POWEROFF, &syscon::REBOOT, &virtio::DRIVER];

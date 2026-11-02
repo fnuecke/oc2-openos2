@@ -4,6 +4,7 @@ local MAX_SKIPPED = 64
 local QUEUE_SIZE = 64
 
 local skipped = {}
+local unskipped = {key_down = true, key_up = true}
 
 function event.pullFiltered(timeout, filter)
   if type(timeout) == "function" then
@@ -27,7 +28,7 @@ function event.pullFiltered(timeout, filter)
     if filter(table.unpack(signal, 1, signal.n)) then
       return table.unpack(signal, 1, signal.n)
     end
-    if not inThread then
+    if not inThread and not unskipped[signal[1]] then
       if #skipped == MAX_SKIPPED then
         table.remove(skipped, 1)
       end

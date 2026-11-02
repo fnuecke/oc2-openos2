@@ -4,6 +4,7 @@ use crate::arch::KernelCell;
 use crate::drivers::uart;
 use crate::drivers::virtio::blk;
 use crate::drivers::virtio::console as vcon;
+use crate::drivers::virtio::input;
 use crate::drivers::virtio::snd;
 use crate::fs::MountText;
 use crate::fs::vfs::{self, Change};
@@ -16,13 +17,14 @@ pub enum Event {
     Port(vcon::Vport),
     Serial(Text<16>),
     Sound(Text<16>),
+    Key(input::Key),
     Power(Request),
 }
 
 static STATE: KernelCell<State> = KernelCell::new(State { stage: Stage::Done, power_signaled: false });
 
 pub fn wait(deadline: u64) {
-    app_wait(pending, deadline);
+    app_wait(pending, deadline.min(input::repeat_deadline()));
 }
 
 pub fn collect() {
@@ -40,7 +42,8 @@ pub fn next() -> Option<Event> {
                 Stage::Medium => Stage::Port,
                 Stage::Port => Stage::Serial,
                 Stage::Serial => Stage::Sound,
-                Stage::Sound => Stage::Power,
+                Stage::Sound => Stage::Keyboard,
+                Stage::Keyboard => Stage::Power,
                 Stage::Power | Stage::Done => Stage::Done,
             };
         }
@@ -54,6 +57,7 @@ fn pending() -> bool {
         || vcon::signal_ready()
         || uart::signal_ready()
         || snd::signal_ready()
+        || input::signal_ready()
         || (power::requested().is_some() && !STATE.with(|s| s.power_signaled))
 }
 
@@ -64,6 +68,7 @@ enum Stage {
     Port,
     Serial,
     Sound,
+    Keyboard,
     Power,
 }
 
@@ -90,6 +95,7 @@ impl State {
                 path.push(snd::take_signal()?.as_bytes());
                 Some(Event::Sound(path))
             }
+            Stage::Keyboard => Some(Event::Key(input::take_signal()?)),
             Stage::Power => {
                 let request = power::requested().filter(|_| !self.power_signaled)?;
                 self.power_signaled = true;

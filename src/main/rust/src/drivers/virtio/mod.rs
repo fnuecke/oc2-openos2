@@ -4,6 +4,7 @@
 
 pub mod blk;
 pub mod console;
+pub mod input;
 pub mod snd;
 
 use super::plic::HandlerData;
@@ -24,6 +25,7 @@ pub struct Driver {
     /// Device::ack_config_change. Sedna fails block requests while a change is pending,
     /// which avoids old ones getting applied to a new medium (e.g. floppy changed).
     pub keeps_config_change: bool,
+    pub interrupt_hook: Option<fn(Device)>,
 }
 
 const REG_MAGIC: u64 = 0x000;
@@ -129,6 +131,10 @@ impl Device {
 
     pub fn config32(self, offset: u32) -> u32 {
         self.0.read32(REG_CONFIG + offset as u64)
+    }
+
+    pub fn set_config8(self, offset: u32, value: u8) {
+        self.0.write8(REG_CONFIG + offset as u64, value);
     }
 
     fn interrupt_status(self) -> u32 {
@@ -356,7 +362,8 @@ fn probe(node: &Node) {
     let Some(driver) = device.id().and_then(|id| VIRTIO_DRIVERS.iter().find(|d| d.id == id)) else { return };
     // Before probing, which may wait for the device.
     if let Some(irq) = node.irq() {
-        let line = Line { base, irq, keeps_config_change: driver.keeps_config_change };
+        let line =
+            Line { base, irq, keeps_config_change: driver.keeps_config_change, interrupt_hook: driver.interrupt_hook };
         let added = LINES.with(|lines| lines.iter_mut().find(|l| l.is_none()).map(|free| *free = Some(line)).is_some());
         if added {
             plic::register(irq, interrupt, HandlerData(base as usize));
@@ -377,6 +384,9 @@ fn interrupt(HandlerData(base): HandlerData) {
         status &= !INTERRUPT_CONFIG_CHANGE;
     }
     device.ack_interrupt(status);
+    if let Some(hook) = line.interrupt_hook {
+        hook(device);
+    }
 }
 
 fn line(base: u64) -> Option<Line> {
@@ -388,4 +398,5 @@ struct Line {
     base: u64,
     irq: u32,
     keeps_config_change: bool,
+    interrupt_hook: Option<fn(Device)>,
 }

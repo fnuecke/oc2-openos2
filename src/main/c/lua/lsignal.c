@@ -184,6 +184,10 @@ static void collect_kernel_signals(lua_State *L) {
             lua_pushlstring(L, signal.value, signal.value_length);
             n++;
         }
+        for (size_t i = 0; i < signal.int_value_count; i++) {
+            lua_pushinteger(L, signal.int_values[i]);
+            n++;
+        }
         if (signal.detail != NULL) {
             lua_pushstring(L, signal.detail);
             n++;

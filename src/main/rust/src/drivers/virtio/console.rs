@@ -9,7 +9,7 @@ use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::{HeapBuf, free, malloc};
 use core::ffi::c_char;
 
-pub const DRIVER: Driver = Driver { id: 3, probe, keeps_config_change: false };
+pub const DRIVER: Driver = Driver { id: 3, probe, keeps_config_change: false, interrupt_hook: None };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Vport(pub usize);

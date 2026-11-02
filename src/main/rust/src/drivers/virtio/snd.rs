@@ -8,7 +8,7 @@ use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::HeapBuf;
 use crate::time::{app_wait, frequency, wait};
 
-pub const DRIVER: Driver = Driver { id: 25, probe, keeps_config_change: false };
+pub const DRIVER: Driver = Driver { id: 25, probe, keeps_config_change: false, interrupt_hook: None };
 
 pub struct Dsp;
 
