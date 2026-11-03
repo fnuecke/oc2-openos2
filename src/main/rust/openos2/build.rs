@@ -10,6 +10,8 @@ const LUA: &[&str] = &[
     "lparser", "lstate", "lstring", "ltable", "ltm", "lundump", "lvm", "lzio", "lauxlib", "lbaselib", "lcorolib",
     "ldblib", "lmathlib", "loadlib", "lstrlib", "ltablib", "lutf8lib", "liolib", "loslib",
 ];
+/// Speed vs. size tradeoff: only ones with -O2, rest is -Os.
+const LUA_O2: &[&str] = &["lapi", "ldo", "lstrlib", "ltable"];
 
 fn main() {
     println!("cargo::rerun-if-changed=../../c/lua");
@@ -21,16 +23,20 @@ fn main() {
     let include = format!("-I{}", env::var("DEP_KERNEL_INCLUDE").unwrap());
     let lua = format!("-I{}", tc.path("external/lua").display());
     let lua_conf = tc.path("src/main/c/lua/lua_conf.h").display().to_string();
-    let app = tc.cflags(&["-std=gnu11", "-Wall", "-Wextra", &include, &lua, "-include", &lua_conf]);
-    let lua_flags = tc.cflags(&["-std=gnu99", "-Wall", &include, "-include", &lua_conf]);
-    let cjson = tc.cflags(&["-std=gnu99", "-Wall", &include, "-include", &lua_conf, &lua]);
+    let app = tc.cflags(&["-std=gnu11", "-Wall", "-Wextra", "-flto", &include, &lua, "-include", &lua_conf]);
+    let lua_flags = tc.cflags(&["-std=gnu99", "-Wall", "-flto", &include, "-include", &lua_conf]);
+    let cjson = tc.cflags(&["-std=gnu99", "-Wall", "-flto", &include, "-include", &lua_conf, &lua]);
 
     let mut units = Vec::new();
     for name in ["app", "luaapi", "lposix", "lsignal"] {
         units.push((tc.path(&format!("src/main/c/lua/{name}.c")), app.clone()));
     }
     for name in LUA {
-        units.push((tc.path(&format!("external/lua/{name}.c")), lua_flags.clone()));
+        let mut flags = lua_flags.clone();
+        if LUA_O2.contains(name) {
+            flags.push("-O2".to_string());
+        }
+        units.push((tc.path(&format!("external/lua/{name}.c")), flags));
     }
     for name in ["lua_cjson", "strbuf", "fpconv"] {
         units.push((tc.path(&format!("external/lua-cjson/{name}.c")), cjson.clone()));
@@ -50,6 +56,7 @@ fn main() {
         "-nostdlib",
         "-no-pie",
         "-Wl,--gc-sections",
+        "-flto",
         "-Wl,--build-id=none",
         &format!("-Wl,-Map,{}/kernel.map", tc.out.display()),
         &format!("-T{}", tc.path("src/main/c/kernel.ld").display()),

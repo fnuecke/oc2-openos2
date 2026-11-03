@@ -30,7 +30,7 @@ fn main() {
         "kernel_libc",
         &[
             (tc.path("src/main/c/kprintf.c"), tc.cflags(&["-std=gnu11", "-Wall", "-Wextra", &include_flag])),
-            (tc.path("external/tlsf/tlsf.c"), tc.cflags(&["-std=gnu11", "-DNDEBUG"])),
+            (tc.path("external/tlsf/tlsf.c"), tc.cflags(&["-std=gnu11", "-DNDEBUG", "-O2"])),
         ],
     );
     println!("cargo::metadata=include={}", include.display());
