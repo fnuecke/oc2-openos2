@@ -120,7 +120,14 @@ extern "C" fn clock() -> c_long {
     (time_now() / (board().timebase / CLOCKS_PER_SEC).max(1)) as c_long
 }
 
-/// musl's time zone code maps the zone file. There is none: everything is UTC.
+#[unsafe(no_mangle)]
+static __utc: [u8; 4] = *b"UTC\0";
+
+#[unsafe(no_mangle)]
+extern "C" fn __tm_to_tzname(_: *const c_void) -> *const c_char {
+    __utc.as_ptr().cast()
+}
+
 #[unsafe(no_mangle)]
 extern "C" fn __map_file(_: *const c_char, _: *mut usize) -> *const u8 {
     core::ptr::null()

@@ -25,6 +25,7 @@ typedef uint64_t u64;
 #define l_system(cmd) ((cmd) == NULL ? 0 : -1)
 #define lua_tmpnam(b, e) { strcpy(b, "/tmp/lua_XXXXXX"); e = mkstemp(b); if (e != -1) fs_close(e); e = (e == -1); }
 #define LUA_TMPNAMBUFSIZE 32
+#define setlocale(c, l) ((void) (c), (l) == NULL || *(l) == 0 || strcmp((l), "C") == 0 ? "C" : NULL)
 #define l_gmtime(t, r) gmtime_r(t, r)
 #define l_localtime(t, r) gmtime_r(t, r)
 #define mktime timegm

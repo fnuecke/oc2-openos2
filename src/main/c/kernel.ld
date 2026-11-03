@@ -30,7 +30,7 @@ SECTIONS {
     }
 
     .data : {
-        *(SORT_BY_ALIGNMENT(.data*) SORT_BY_ALIGNMENT(.sdata*))
+        *(.data .data.* .sdata .sdata.*)
     }
 
     .bss (NOLOAD) : {

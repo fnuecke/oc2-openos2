@@ -30,6 +30,11 @@ _start:
 entry:
     /* Physical addresses until paging is on, so PC-relative addressing only. */
     mv      s0, a1
+    lla     t0, _bss_start
+    lla     t1, _bss_end
+1:  sd      zero, 0(t0)
+    addi    t0, t0, 8
+    bltu    t0, t1, 1b
     lla     sp, _stack_top
     call    boot_paging
 
@@ -42,11 +47,6 @@ virtual_entry:
     li      t0, 1 << 13         /* sstatus.FS = initial, before any code may use the FPU */
     csrs    sstatus, t0
     fscsr   zero
-    lla     t0, _bss_start
-    lla     t1, _bss_end
-1:  sd      zero, 0(t0)
-    addi    t0, t0, 8
-    bltu    t0, t1, 1b
     mv      a0, s0
     call    kmain
 3:  wfi

@@ -16,8 +16,6 @@ pub const PTE_LEAF: u64 = 0xCF; // valid, readable, writable, executable, access
 #[repr(C, align(4096))]
 pub struct PageTable(pub [u64; 512]);
 
-/// In .data, since the bss is cleared after boot_paging.
-#[unsafe(link_section = ".data.page_table")]
 pub static BOOT_PAGE_TABLE: RawCell<PageTable> = RawCell::new(PageTable([0; 512]));
 
 #[inline(always)]
