@@ -8,6 +8,9 @@ const OBJCOPY: &str = "riscv64-linux-gnu-objcopy";
 const OBJDUMP: &str = "riscv64-linux-gnu-objdump";
 const AR: &str = "riscv64-linux-gnu-ar";
 
+const LAYOUTS: [(&str, &str); 4] = [("us", "us"), ("de", "de"), ("fr", "fr"), ("uk", "gb")]; // file, xkb layout
+const XKB_COPYRIGHT: &str = "/usr/share/doc/xkb-data/copyright";
+
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
     let build = root.join("build/os");
@@ -35,11 +38,14 @@ fn main() {
     assert_eq!(count("tp"), 2, "tp: only the trap frame");
 
     run(Command::new(OBJCOPY).args(["-O", "binary"]).arg(&elf).arg(build.join("Image")));
+    let rootfs = build.join("rootfs");
+    keymaps(&rootfs.join("usr/share/keymaps"));
     run(Command::new(root.join("mkdisk.sh"))
         .env("SIZE", "2M")
         .arg(build.join("disk.img"))
         .arg(build.join("Image"))
-        .arg(root.join("src/main/rootfs")));
+        .arg(root.join("src/main/rootfs"))
+        .arg(&rootfs));
 
     let members = output(Command::new(AR).arg("t").arg(&artifacts.staticlib));
     let member: Vec<_> = members.lines().filter(|m| m.starts_with("kernel_c-")).collect();
@@ -62,6 +68,19 @@ fn main() {
     fs::copy(root.join("src/main/c/kernel.mk"), kernel.join("kernel.mk")).unwrap();
 
     run(Command::new("make").arg("-s").arg("-C").arg(root.join("examples")));
+}
+
+fn keymaps(out: &Path) {
+    let _ = fs::remove_dir_all(out);
+    fs::create_dir_all(out).unwrap();
+    for (name, layout) in LAYOUTS {
+        let mut ckbcomp =
+            Command::new("ckbcomp").args(["-compact", "-layout", layout]).stdout(Stdio::piped()).spawn().unwrap();
+        let keymap = bytes(Command::new("loadkeys").args(["-b", "-u", "-"]).stdin(ckbcomp.stdout.take().unwrap()));
+        assert!(ckbcomp.wait().unwrap().success(), "ckbcomp -layout {layout} failed");
+        fs::write(out.join(format!("{name}.kmap")), keymap).unwrap();
+    }
+    fs::copy(XKB_COPYRIGHT, out.join("COPYING")).unwrap();
 }
 
 struct Artifacts {

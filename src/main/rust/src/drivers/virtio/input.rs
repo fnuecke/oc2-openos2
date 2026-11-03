@@ -2,9 +2,10 @@
 
 use super::{Buf, Device, Driver, Virtq};
 use crate::api::time::TIME_NEVER;
-use crate::arch::{IrqCell, time_now};
-use crate::fs::Name;
+use crate::arch::{IrqCell, KernelCell, time_now};
+use crate::fs::devfs;
 use crate::fs::sysfs::{self, Content};
+use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::HeapBuf;
 use crate::time::{entropy_add, frequency};
 
@@ -13,7 +14,7 @@ pub const DRIVER: Driver = Driver { id: 18, probe, keeps_config_change: false, i
 pub struct Key {
     pub keyboard: Name,
     pub down: bool,
-    pub ch: u32,
+    pub ch: Option<u32>,
     pub code: u16,
 }
 
@@ -47,6 +48,51 @@ impl sysfs::Class for Keyboards {
     }
 }
 
+pub struct Keymap;
+
+impl devfs::Device for Keymap {
+    fn count(&self) -> usize {
+        1
+    }
+
+    fn name(&self, _: usize) -> Option<Name> {
+        Some(Name::of(b"keymap"))
+    }
+
+    fn open(&self, index: usize, flags: OpenFlags) -> Result<usize> {
+        if flags.has(OpenFlags::READ) || !flags.has(OpenFlags::WRITE) {
+            return Err(Error::Denied);
+        }
+        LOADER.with(|loader| {
+            if loader.open {
+                return Err(Error::Busy);
+            }
+            *loader = Loader::CLOSED;
+            loader.open = true;
+            Ok(index)
+        })
+    }
+
+    fn read(&self, _: usize, _: u64, _: &mut [u8]) -> Result<usize> {
+        Err(Error::BadFd)
+    }
+
+    fn write(&self, _: usize, _: u64, src: &[u8]) -> Result<usize> {
+        LOADER.with(|loader| {
+            if loader.failed || src.iter().try_for_each(|&byte| loader.feed(byte)).is_err() {
+                loader.failed = true;
+                return Err(Error::Invalid);
+            }
+            Ok(src.len())
+        })
+    }
+
+    fn close(&self, _: usize) -> Result<()> {
+        let loader = LOADER.with(|loader| core::mem::replace(loader, Loader::CLOSED));
+        if loader.failed || loader.complete() { Ok(()) } else { Err(Error::Invalid) }
+    }
+}
+
 const CONFIG_SELECT: u32 = 0;
 const CONFIG_SUBSEL: u32 = 1;
 const CONFIG_SIZE: u32 = 2;
@@ -62,11 +108,16 @@ const MAX_BUFFERS: u16 = 16;
 const KEY_LEFTCTRL: u16 = 29;
 const KEY_LEFTSHIFT: u16 = 42;
 const KEY_RIGHTSHIFT: u16 = 54;
+const KEY_KPASTERISK: u16 = 55;
 const KEY_LEFTALT: u16 = 56;
 const KEY_CAPSLOCK: u16 = 58;
 const KEY_NUMLOCK: u16 = 69;
 const KEY_SCROLLLOCK: u16 = 70;
+const KEY_KP7: u16 = 71;
+const KEY_KPDOT: u16 = 83;
+const KEY_KPENTER: u16 = 96;
 const KEY_RIGHTCTRL: u16 = 97;
+const KEY_KPSLASH: u16 = 98;
 const KEY_RIGHTALT: u16 = 100;
 
 const SHIFT: u8 = 1;
@@ -76,6 +127,7 @@ const LEFT_SHIFT: u8 = 8;
 const RIGHT_SHIFT: u8 = 16;
 const LEFT_CTRL: u8 = 32;
 const RIGHT_CTRL: u8 = 64;
+const ALTGR: u8 = 128;
 
 const REPEAT_DELAY_MS: u64 = 250;
 const REPEAT_PERIOD_MS: u64 = 33;
@@ -84,20 +136,39 @@ const MAX_KEYBOARDS: usize = 4;
 const RING_SIZE: usize = 32;
 const TRACKED_KEYS: usize = 256;
 
-// Linux US defkeymap, Num Lock on, codes up to KEY_KPSLASH.
-const PLAIN: &[u8; 99] = b"\0\x1b1234567890-=\x7f\tqwertyuiop[]\r\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 \0\
+const KEYS: usize = KEY_KPSLASH as usize + 1;
+
+// Linux US defkeymap, Num Lock on.
+const PLAIN: &[u8; KEYS] = b"\0\x1b1234567890-=\x7f\tqwertyuiop[]\r\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 \0\
     \0\0\0\0\0\0\0\0\0\0\0\x00789-456+1230.\0\0<\0\0\0\0\0\0\0\0\0\r\0/";
-const SHIFTED: &[u8; 99] = b"\0\x1b!@#$%^&*()_+\x7f\tQWERTYUIOP{}\r\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 \0\
+const SHIFTED: &[u8; KEYS] = b"\0\x1b!@#$%^&*()_+\x7f\tQWERTYUIOP{}\r\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 \0\
     \0\0\0\0\0\0\0\0\0\0\0\x00789-456+1230.\0\0>\0\0\0\0\0\0\0\0\0\r\0/";
-const CONTROL: &[u8; 99] =
-    b"\0\0\0\0\x1b\x1c\x1d\x1e\x1f\x7f\0\0\x1f\0\x08\0\x11\x17\x05\x12\x14\x19\x15\t\x0f\x10\x1b\x1d\r\0\
-    \x01\x13\x04\x06\x07\x08\x0a\x0b\x0c\0\x07\0\0\x1c\x1a\x18\x03\x16\x02\x0e\r\0\0\x7f\0*\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
-    \x00789-456+1230.\0\0\0\0\0\0\0\0\0\0\0\0\r\0/";
-const SHIFTED_CONTROL: &[u8; 99] = b"\0\0\0\0\0\0\0\0\0\0\0\0\x1f\0\0\0\x11\x17\x05\x12\x14\x19\x15\t\x0f\x10\0\0\r\0\
-    \x01\x13\x04\x06\x07\x08\x0a\x0b\x0c\0\0\0\0\0\x1a\x18\x03\x16\x02\x0e\r\0\0\0\0*\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
-    \x00789-456+1230.\0\0\0\0\0\0\0\0\0\0\0\0\r\0/";
+
+// Linux's binary keymap, as `loadkeys -b` writes it: the magic, a flag per table, then each present table.
+const BKEYMAP_MAGIC: &[u8; 7] = b"bkeymap";
+const BKEYMAP_TABLES: usize = 256;
+const BKEYMAP_HEADER: usize = BKEYMAP_MAGIC.len() + BKEYMAP_TABLES;
+const BKEYMAP_TABLE: usize = 128 * 2;
+const LEVELS: usize = 4; // the tables for no modifier, Shift, AltGr and Shift+AltGr
+
+// Keysym types and keysyms of linux/keyboard.h.
+const KT_LATIN: u8 = 0;
+const KT_SPEC: u8 = 2;
+const KT_PAD: u8 = 3;
+const KT_DEAD: u8 = 4;
+const KT_META: u8 = 8;
+const KT_LETTER: u8 = 11;
+const NR_TYPES: u8 = 15;
+const K_ENTER: u16 = 0x0201;
+const K_ALTGR: u16 = 0x0701;
+const UNICODE: u16 = 0xf000;
+
+const PAD_CHARS: &[u8; 21] = b"0123456789+-*/\r,.?()#";
+const DEAD_ACCENTS: [u16; 13] = [0x60, 0xb4, 0x5e, 0x7e, 0xa8, 0xb8, 0xaf, 0x2d8, 0x2d9, 0x2da, 0x2dd, 0x2c7, 0x2db];
 
 static STATE: IrqCell<State> = IrqCell::new(State { count: 0, keyboards: [const { Keyboard::EMPTY }; MAX_KEYBOARDS] });
+static LAYOUT: KernelCell<Layout> = KernelCell::new(Layout::US);
+static LOADER: KernelCell<Loader> = KernelCell::new(Loader::CLOSED);
 
 pub fn count() -> usize {
     STATE.with(|state| state.count)
@@ -180,17 +251,151 @@ fn repeats(code: u16) -> bool {
     )
 }
 
-fn character(code: u16, modifiers: u8) -> u32 {
-    let index = code as usize;
-    let letter = PLAIN.get(index).is_some_and(u8::is_ascii_lowercase);
-    let shift = (modifiers & SHIFT != 0) != (letter && modifiers & CAPS != 0);
-    let map = match (modifiers & CTRL != 0, shift) {
-        (false, false) => PLAIN,
-        (false, true) => SHIFTED,
-        (true, false) => CONTROL,
-        (true, true) => SHIFTED_CONTROL,
+fn character(code: u16, modifiers: u8) -> Option<u32> {
+    let ch = LAYOUT.with(|layout| layout.character(code, modifiers))?;
+    if modifiers & CTRL == 0 || matches!(code, KEY_KPASTERISK | KEY_KP7..=KEY_KPDOT | KEY_KPENTER | KEY_KPSLASH) {
+        return Some(ch);
+    }
+    match char::from_u32(ch)? {
+        'a'..='z' | 'A'..='Z' => Some(ch & 0x1f),
+        '@' | '2' | ' ' | '`' => Some(0),
+        '3' | '[' => Some(0x1b),
+        '4' | '\\' => Some(0x1c),
+        '5' | ']' => Some(0x1d),
+        '6' | '^' => Some(0x1e),
+        '7' | '-' | '_' => Some(0x1f),
+        '8' | '/' => Some(0x7f),
+        '\'' => Some(0x07),
+        '\x7f' => Some(0x08),
+        '\r' => Some(ch),
+        _ => None,
+    }
+}
+
+fn keysym_character(keysym: u16) -> Result<u16> {
+    let [value, kind] = keysym.to_le_bytes();
+    let index = value as usize;
+    Ok(match kind {
+        KT_LATIN | KT_LETTER | KT_META => value as u16,
+        KT_SPEC if keysym == K_ENTER => b'\r' as u16,
+        KT_PAD => PAD_CHARS.get(index).map_or(0, |&c| c as u16),
+        KT_DEAD => DEAD_ACCENTS.get(index).copied().unwrap_or(0),
+        NR_TYPES => return Err(Error::Invalid),
+        ..NR_TYPES => 0,
+        _ => Some(keysym ^ UNICODE).filter(|c| !(0xd800..=0xdfff).contains(c)).ok_or(Error::Invalid)?,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct Layout {
+    keys: [[u16; LEVELS]; KEYS],
+    caps: [u8; KEYS.div_ceil(8)],
+    altgr: bool, // the right Alt key is AltGr, only if the keymap says so, like on Linux
+}
+
+impl Layout {
+    const EMPTY: Self = Self { keys: [[0; LEVELS]; KEYS], caps: [0; KEYS.div_ceil(8)], altgr: false };
+
+    const US: Self = {
+        let mut layout = Self::EMPTY;
+        let mut code = 0;
+        while code < KEYS {
+            layout.keys[code] = [PLAIN[code] as u16, SHIFTED[code] as u16, 0, 0];
+            if PLAIN[code].is_ascii_lowercase() {
+                layout.caps[code / 8] |= 1 << (code % 8);
+            }
+            code += 1;
+        }
+        layout
     };
-    map.get(index).copied().unwrap_or(0) as u32
+
+    fn character(&self, code: u16, modifiers: u8) -> Option<u32> {
+        let index = code as usize;
+        let [plain, shifted, altgr, shifted_altgr] = *self.keys.get(index)?;
+        let caps = modifiers & CAPS != 0 && self.caps.get(index / 8).is_some_and(|bits| bits & (1 << (index % 8)) != 0);
+        let shift = modifiers & SHIFT != 0;
+        let level3 = if shift { shifted_altgr } else { altgr };
+        let ch = if modifiers & ALTGR != 0 && self.altgr && level3 != 0 {
+            level3
+        } else if shift != caps {
+            shifted
+        } else {
+            plain
+        };
+        (ch != 0).then_some(ch as u32)
+    }
+}
+
+struct Loader {
+    open: bool,
+    failed: bool,
+    pos: usize,
+    tables: usize,
+    kept: usize, // present tables below LEVELS
+    levels: u8,  // the level of each kept table, two bits each
+    low: u8,     // of the keysym being read
+    layout: Layout,
+}
+
+impl Loader {
+    const CLOSED: Self =
+        Self { open: false, failed: false, pos: 0, tables: 0, kept: 0, levels: 0, low: 0, layout: Layout::EMPTY };
+
+    fn complete(&self) -> bool {
+        self.pos == BKEYMAP_HEADER + self.tables * BKEYMAP_TABLE
+    }
+
+    fn feed(&mut self, byte: u8) -> Result<()> {
+        self.parse(byte)?;
+        if self.complete() {
+            LAYOUT.with(|layout| *layout = self.layout);
+        }
+        Ok(())
+    }
+
+    fn parse(&mut self, byte: u8) -> Result<()> {
+        let pos = self.pos;
+        self.pos += 1;
+        if let Some(&expected) = BKEYMAP_MAGIC.get(pos) {
+            return if byte == expected { Ok(()) } else { Err(Error::Invalid) };
+        }
+        if pos < BKEYMAP_HEADER {
+            if byte > 1 {
+                return Err(Error::Invalid);
+            }
+            let table = pos - BKEYMAP_MAGIC.len();
+            if byte == 1 && table < LEVELS {
+                self.levels |= (table as u8) << (2 * self.kept);
+                self.kept += 1;
+            }
+            self.tables += byte as usize;
+            return Ok(());
+        }
+        let entry = pos - BKEYMAP_HEADER;
+        let (table, code) = (entry / BKEYMAP_TABLE, entry % BKEYMAP_TABLE / 2);
+        if table >= self.tables {
+            return Err(Error::Invalid);
+        }
+        if entry.is_multiple_of(2) {
+            self.low = byte;
+            return Ok(());
+        }
+        if table >= self.kept {
+            return Ok(());
+        }
+        let level = (self.levels >> (2 * table)) as usize & 3;
+        let keysym = u16::from_le_bytes([self.low, byte]);
+        self.layout.altgr |= level == 0 && code == KEY_RIGHTALT as usize && keysym == K_ALTGR;
+        let Some(ch) = self.layout.keys.get_mut(code).and_then(|key| key.get_mut(level)) else { return Ok(()) };
+        *ch = keysym_character(keysym)?;
+        if level == 0
+            && keysym >> 8 == KT_LETTER as u16
+            && let Some(bits) = self.layout.caps.get_mut(code / 8)
+        {
+            *bits |= 1 << (code % 8);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -292,6 +497,7 @@ impl Keyboard {
             KEY_RIGHTSHIFT => RIGHT_SHIFT,
             KEY_LEFTCTRL => LEFT_CTRL,
             KEY_RIGHTCTRL => RIGHT_CTRL,
+            KEY_RIGHTALT => ALTGR,
             _ => 0,
         };
         if down {
@@ -309,7 +515,7 @@ impl Keyboard {
     fn state(&self) -> u8 {
         let shift = if self.modifiers & (LEFT_SHIFT | RIGHT_SHIFT) != 0 { SHIFT } else { 0 };
         let ctrl = if self.modifiers & (LEFT_CTRL | RIGHT_CTRL) != 0 { CTRL } else { 0 };
-        shift | ctrl | (self.modifiers & CAPS)
+        shift | ctrl | (self.modifiers & (CAPS | ALTGR))
     }
 
     fn push(&mut self, entry: Entry) {

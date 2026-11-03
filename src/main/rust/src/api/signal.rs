@@ -50,7 +50,7 @@ impl Signal {
             Event::Serial(path) => Self::new(c"serial", path.as_bytes()),
             Event::Sound(path) => Self::new(c"sound", path.as_bytes()),
             Event::Key(key) => Self {
-                int_values: [key.ch as i64, key.code as i64],
+                int_values: [key.ch.map_or(-1, i64::from), key.code as i64],
                 int_value_count: 2,
                 ..Self::new(if key.down { c"key_down" } else { c"key_up" }, key.keyboard.as_bytes())
             },

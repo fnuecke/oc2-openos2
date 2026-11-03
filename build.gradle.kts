@@ -4,7 +4,7 @@ plugins {
 }
 
 val semver = providers.gradleProperty("semver").get()
-val toolchainImage = "oc-openos2-toolchain:4"
+val toolchainImage = "oc-openos2-toolchain:7"
 
 version = semver
 group = "li.cil.oc2"
@@ -21,7 +21,7 @@ val tlsfSources = layout.projectDirectory.dir("external/tlsf")
 val outputDir = layout.buildDirectory.dir("os")
 val toolchainId = layout.buildDirectory.file("toolchain-image.id")
 val buildToolchainImage = tasks.register<Exec>("buildToolchainImage") {
-    description = "Builds the container holding the RISC-V cross compiler, musl and e2fsprogs."
+    description = "Builds the container holding the RISC-V cross compiler, musl, e2fsprogs and the keymap tools."
     inputs.file("Dockerfile")
     outputs.file(toolchainId)
     doFirst { toolchainId.get().asFile.parentFile.mkdirs() }

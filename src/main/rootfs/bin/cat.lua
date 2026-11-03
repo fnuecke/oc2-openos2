@@ -13,6 +13,11 @@ end
 if #args == 0 then
   args[1] = "-"
 end
+local function writeError(reason)
+  io.stderr:write("cat: write error: ", reason, "\n")
+  return 1
+end
+
 local code = 0
 for _, path in ipairs(args) do
   local file, reason = io.stdin, nil
@@ -26,7 +31,10 @@ for _, path in ipairs(args) do
     repeat
       local chunk, readReason = file:read(path == "-" and "L" or 4096)
       if chunk then
-        io.write(chunk)
+        local written, writeReason = io.write(chunk)
+        if not written then
+          return writeError(writeReason)
+        end
       elseif readReason then
         io.stderr:write("cat: ", path, ": ", readReason, "\n")
         code = 1
@@ -36,5 +44,9 @@ for _, path in ipairs(args) do
       file:close()
     end
   end
+end
+local flushed, flushReason = io.flush()
+if not flushed then
+  return writeError(flushReason)
 end
 return code

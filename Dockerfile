@@ -4,8 +4,8 @@ ARG MUSL_VERSION=1.2.4
 ARG MUSL_SHA256=7a35eae33d5372a7c0da1188de798726f68825513b7ae3ebe97aaaa52114f039
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl e2fsprogs gcc gcc-riscv64-linux-gnu libc6-dev make \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates console-setup curl e2fsprogs gcc gcc-riscv64-linux-gnu kbd libc6-dev make xkb-data \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL -o /tmp/musl.tar.gz "https://musl.libc.org/releases/musl-${MUSL_VERSION}.tar.gz" \

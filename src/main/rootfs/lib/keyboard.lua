@@ -68,7 +68,7 @@ for code, name in pairs(names) do
 end
 
 function keyboard.isControl(char)
-  return type(char) == "number" and (char < 0x20 or (char >= 0x7F and char <= 0x9F))
+  return type(char) == "number" and (char >= 0 and char < 0x20 or char >= 0x7F and char <= 0x9F)
 end
 
 return keyboard
