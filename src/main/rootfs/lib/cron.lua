@@ -71,7 +71,7 @@ local function run(command)
     local streams = require("system").streams()
     streams.input, streams.output = io.open("/dev/null"), io.open("/dev/null", "w")
     streams.errors, streams.files = streams.output, {streams.input, streams.output}
-    shell.execute(command)
+    shell.subshell(command)
   end)
   job.name, job.parent = command, 0
 end

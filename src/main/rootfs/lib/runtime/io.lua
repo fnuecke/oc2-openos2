@@ -71,6 +71,10 @@ function io.lines(path, ...)
   return kernelLines(type(path) == "string" and canonical(path) or path, ...)
 end
 
+function io.popen(command, mode)
+  return require("pipe").popen(command, mode)
+end
+
 function io.read(...)
   return streams.input:read(...)
 end

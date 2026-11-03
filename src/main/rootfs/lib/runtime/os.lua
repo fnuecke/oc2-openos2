@@ -22,6 +22,6 @@ function os.execute(command)
   if command == nil then
     return true
   end
-  local code = require("shell").execute(command)
+  local code = require("shell").subshell(command)
   return code == 0 or nil, "exit", code
 end

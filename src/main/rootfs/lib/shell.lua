@@ -408,6 +408,16 @@ function shell.execute(line, expanding)
   return lastCode()
 end
 
+function shell.subshell(line)
+  local ok, result = system.rawpcall(shell.execute, line)
+  if ok then
+    return result
+  elseif isExit(result) then
+    return toCode(result.exit)
+  end
+  error(result, 0)
+end
+
 function runCommand(line)
   local words, globs = lex(line)
   if not words then

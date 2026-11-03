@@ -47,7 +47,7 @@ function jobs.start(text)
     local streams = system.streams()
     streams.process, streams.input = parent, io.open("/dev/null")
     streams.files = {streams.input}
-    job.code = shell.execute(text)
+    job.code = shell.subshell(text)
   end)
   job.thread.name = text
   list[#list + 1] = job
