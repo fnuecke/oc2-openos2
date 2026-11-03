@@ -53,4 +53,16 @@ function dofile(path)
   return assert(loadfile(path))()
 end
 
+package.searchers[2] = function(name)
+  local file, reason = package.searchpath(name, (package.path:gsub("[^;]+", absolute)))
+  if not file then
+    return reason
+  end
+  local chunk, err = loadfile(file)
+  if not chunk then
+    error(("error loading module '%s' from file '%s':\n\t%s"):format(name, file, err), 0)
+  end
+  return chunk, file
+end
+
 return paths

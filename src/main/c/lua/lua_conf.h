@@ -13,7 +13,7 @@ typedef uint64_t u64;
 #define LUAI_MAXCCALLS 100
 
 #define lua_getlocaledecpoint() '.'
-#define LUA_PATH_DEFAULT "/lib/?.lua;/lib/?/init.lua;/mnt/builtin/lib/lua/?.lua;/mnt/builtin/lib/lua/?/init.lua"
+#define LUA_PATH_DEFAULT "/lib/?.lua;/lib/?/init.lua;/mnt/builtin/lib/lua/?.lua;/mnt/builtin/lib/lua/?/init.lua;./?.lua;./?/init.lua"
 #define LUA_CPATH_DEFAULT ""
 #define lua_writestring(s, l) console_write((s), (l))
 #define lua_writeline() console_write("\n", 1)
