@@ -90,7 +90,7 @@ local function await(state, ready, arg)
 end
 
 local function hasLine(state)
-  return state.data:find("\n", state.offset, true) ~= nil
+  return state.data:find("\n", state.offset, true) ~= nil or available(state) >= CAPACITY
 end
 
 local function hasBytes(state, count)
