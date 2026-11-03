@@ -6,7 +6,10 @@ use crate::arch::{IrqCell, csr_write, irq_disable, time_now, wfi};
 use crate::board::board;
 use crate::drivers::syscon;
 use crate::fs::vfs::unmount_all;
+use crate::signal::{self, Event, SOURCES};
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering::Relaxed};
+
+register!(SOURCES, &Requests);
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Request {
@@ -19,6 +22,7 @@ const REQUEST_TIMEOUT_S: u64 = 5;
 static REQUESTED: AtomicU8 = AtomicU8::new(0); // a Request, 0 for none
 static REQUESTED_AT: AtomicU64 = AtomicU64::new(0);
 static UNSEEN: AtomicBool = AtomicBool::new(false);
+static SIGNALED: AtomicBool = AtomicBool::new(false);
 static REQUEST_HANDLER: IrqCell<InterruptHandler> = IrqCell::new(None);
 
 pub fn request(request: Request) {
@@ -86,4 +90,20 @@ pub fn check() {
     };
     unsafe { kprintf(c"\n%s requested and not answered, unmounting\n".as_ptr(), what.as_ptr()) };
     act()
+}
+
+struct Requests;
+
+impl signal::Source for Requests {
+    fn pending(&self) -> bool {
+        requested().is_some() && !SIGNALED.load(Relaxed)
+    }
+
+    fn take(&self) -> Option<Event> {
+        let request = requested().filter(|_| !SIGNALED.swap(true, Relaxed))?;
+        Some(Event::new(match request {
+            Request::PowerOff => c"shutdown",
+            Request::Reboot => c"reboot",
+        }))
+    }
 }

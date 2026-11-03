@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 
-use super::Driver;
+use super::{DRIVERS, Driver};
 use crate::arch::{KernelCell, Mmio};
 use crate::fdt::Node;
 use crate::fs::Name;
-use crate::fs::sysfs::{self, Content};
+use crate::fs::sysfs::{self, CLASSES, Content};
 use crate::time::civil_from_time;
 
-pub const DRIVER: Driver = Driver { compatible: &[b"google,goldfish-rtc"], probe };
+register!(DRIVERS, &Driver { compatible: &[b"google,goldfish-rtc"], probe });
+register!(CLASSES, &Clocks);
 
-pub struct Clocks;
+struct Clocks;
 
 impl sysfs::Class for Clocks {
     fn name(&self) -> &'static [u8] {

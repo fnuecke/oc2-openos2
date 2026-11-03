@@ -1,28 +1,18 @@
 // SPDX-License-Identifier: MIT
-//! virtio-snd, as OSS-style /dev/dsp (U8), /dev/dspW (S16_LE) and /dev/audio (mu-law), mono at 11025 Hz.
 
-use super::{Buf, Device, Driver, Virtq};
+use super::{Buf, Device, VDriver, VIRTIO_DRIVERS, Virtq};
 use crate::arch::{KernelCell, time_now};
-use crate::fs::devfs::{self, Poll};
+use crate::fs::devfs::{self, DEVICES, Poll};
 use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::HeapBuf;
+use crate::signal::{self, Event, SOURCES, Value};
 use crate::time::{app_wait, frequency, wait};
 
-pub const DRIVER: Driver = Driver { id: 25, probe, keeps_config_change: false, interrupt_hook: None };
+register!(VIRTIO_DRIVERS, &VDriver { id: 25, probe, keeps_config_change: false, interrupt_hook: None });
+register!(DEVICES, &Dsp);
+register!(SOURCES, &Dsp);
 
-pub struct Dsp;
-
-pub fn signal_ready() -> bool {
-    STATE.with(State::signal_due)
-}
-
-pub fn take_signal() -> Option<Name> {
-    STATE.with(|state| {
-        let stream = state.signal_due().then_some(state.stream.as_mut()).flatten()?;
-        stream.blocked = false;
-        Some(Name::of(stream.name))
-    })
-}
+struct Dsp;
 
 impl devfs::Device for Dsp {
     fn count(&self) -> usize {
@@ -89,6 +79,22 @@ impl devfs::Device for Dsp {
         }
         let released = STATE.with(State::release);
         flushed.and(released)
+    }
+}
+
+impl signal::Source for Dsp {
+    fn pending(&self) -> bool {
+        STATE.with(State::signal_due)
+    }
+
+    fn take(&self) -> Option<Event> {
+        STATE.with(|state| {
+            let stream = state.signal_due().then_some(state.stream.as_mut()).flatten()?;
+            stream.blocked = false;
+            let mut path = Value::of(b"/dev/");
+            path.push(stream.name);
+            Some(Event { value: Some(path), ..Event::new(c"sound") })
+        })
     }
 }
 

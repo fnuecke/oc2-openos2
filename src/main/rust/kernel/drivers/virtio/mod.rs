@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: MIT
-//! virtio-mmio v2 transport and split virtqueues, shared by all virtio drivers. Probing a
-//! virtio,mmio node hands the device to the driver for its device ID, see drivers::VIRTIO_DRIVERS.
 
 pub mod blk;
 pub mod console;
@@ -8,7 +6,7 @@ pub mod input;
 pub mod snd;
 
 use super::plic::HandlerData;
-use super::{VIRTIO_DRIVERS, plic};
+use super::{DRIVERS, Driver, plic};
 use crate::arch::{IrqCell, Mmio};
 use crate::board::virt_to_phys;
 use crate::fdt::Node;
@@ -16,9 +14,10 @@ use crate::mem::malloc;
 use core::arch::asm;
 use core::ffi::c_void;
 
-pub const DRIVER: super::Driver = super::Driver { compatible: &[b"virtio,mmio"], probe };
+registry!(pub VIRTIO_DRIVERS: &'static VDriver);
+register!(DRIVERS, &Driver { compatible: &[b"virtio,mmio"], probe });
 
-pub struct Driver {
+pub struct VDriver {
     pub id: u32,
     pub probe: fn(Device) -> bool,
     /// Leaves a configuration change pending until the driver acknowledges it, see

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 
-use super::{Device, MAX_FILES, Name, lookup};
+use super::{DEVICES, Device, MAX_FILES, Name, lookup};
 use crate::arch::KernelCell;
 use crate::drivers::virtio::blk::{self, Fault, SECTOR_SIZE};
 use crate::fs::{Data, Error, OpenFlags, Result, ext2, trim_slashes};
 
-pub struct Disks;
+register!(DEVICES, &Disks);
+
+struct Disks;
 
 impl Device for Disks {
     fn count(&self) -> usize {

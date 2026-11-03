@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 
 use super::plic::HandlerData;
-use super::{Driver, plic};
+use super::{DRIVERS, Driver, plic};
 use crate::arch::{KernelCell, Mmio};
 use crate::board::board;
 use crate::fdt::Node;
 use crate::power::{self, Request};
 
-pub const DRIVER: Driver = Driver { compatible: &[b"sedna,syscon"], probe };
-pub const POWEROFF: Driver = Driver { compatible: &[b"syscon-poweroff"], probe: |node| probe_write(node, &POWER_OFF) };
-pub const REBOOT: Driver = Driver { compatible: &[b"syscon-reboot"], probe: |node| probe_write(node, &REBOOT_WRITE) };
+register!(DRIVERS, &Driver { compatible: &[b"sedna,syscon"], probe });
+register!(DRIVERS, &Driver { compatible: &[b"syscon-poweroff"], probe: |node| probe_write(node, &POWER_OFF) });
+register!(DRIVERS, &Driver { compatible: &[b"syscon-reboot"], probe: |node| probe_write(node, &REBOOT_WRITE) });
+
 const CONTROL: u64 = 0x08;
 const STATUS: u64 = 0x0C;
 const CONTROL_ENABLE: u32 = 1 << 1;

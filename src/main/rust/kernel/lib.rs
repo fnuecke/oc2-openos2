@@ -2,6 +2,9 @@
 
 #![no_std]
 
+#[macro_use]
+mod registry;
+
 mod api;
 mod arch;
 mod board;

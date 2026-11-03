@@ -21,10 +21,16 @@ SECTIONS {
 
     .rodata : {
         *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(8); /* the registries in registry.rs */
+        __registry_DRIVERS_start = .; KEEP(*(.registry.DRIVERS)) __registry_DRIVERS_end = .;
+        __registry_VIRTIO_DRIVERS_start = .; KEEP(*(.registry.VIRTIO_DRIVERS)) __registry_VIRTIO_DRIVERS_end = .;
+        __registry_DEVICES_start = .; KEEP(*(.registry.DEVICES)) __registry_DEVICES_end = .;
+        __registry_CLASSES_start = .; KEEP(*(.registry.CLASSES)) __registry_CLASSES_end = .;
+        __registry_SOURCES_start = .; KEEP(*(.registry.SOURCES)) __registry_SOURCES_end = .;
     }
 
     .data : {
-        *(.data .data.* .sdata .sdata.*)
+        *(SORT_BY_ALIGNMENT(.data*) SORT_BY_ALIGNMENT(.sdata*))
     }
 
     .bss (NOLOAD) : {

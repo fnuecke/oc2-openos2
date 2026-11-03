@@ -8,7 +8,10 @@ use super::{
 use crate::arch::KernelCell;
 use crate::drivers::virtio::blk::{self, MAX_DISKS};
 use crate::power;
+use crate::signal::{self, Event, SOURCES};
 use core::ffi::c_int;
+
+register!(SOURCES, &Media);
 
 pub trait FileSystem: Sync {
     fn stat(&self, mount: MountId, path: &[u8]) -> Result<Stat>;
@@ -65,6 +68,36 @@ pub enum Change {
     Added,
     Removed,
     Changed,
+}
+
+struct Media;
+
+impl signal::Source for Media {
+    fn pending(&self) -> bool {
+        MEDIUM_EVENTS.with(|q| q.head != q.tail)
+            || (0..blk::count()).filter_map(blk::get).any(blk::Disk::change_pending)
+    }
+
+    fn take(&self) -> Option<Event> {
+        let event = MEDIUM_EVENTS.with(|q| {
+            if q.head == q.tail {
+                return None;
+            }
+            let event = q.events[(q.tail % MAX_MEDIUM_EVENTS as u32) as usize];
+            q.tail = q.tail.wrapping_add(1);
+            Some(event)
+        })?;
+        let detail = match event.what {
+            Change::Added => c"added",
+            Change::Removed => c"removed",
+            Change::Changed => c"changed",
+        };
+        Some(Event { detail: Some(detail), ..Event::with_value(c"medium", event.path.as_bytes()) })
+    }
+
+    fn collect(&self) {
+        poll_media();
+    }
 }
 
 pub struct Path {
@@ -144,21 +177,6 @@ pub fn medium_event(path: &[u8], what: Change) {
         q.events[(q.head % MAX_MEDIUM_EVENTS as u32) as usize] = MediumEvent { path: MountText::of(path), what };
         q.head = q.head.wrapping_add(1);
     });
-}
-
-pub fn take_medium_event() -> Option<(MountText, Change)> {
-    MEDIUM_EVENTS.with(|q| {
-        if q.head == q.tail {
-            return None;
-        }
-        let event = q.events[(q.tail % MAX_MEDIUM_EVENTS as u32) as usize];
-        q.tail = q.tail.wrapping_add(1);
-        Some((event.path, event.what))
-    })
-}
-
-pub fn medium_event_pending() -> bool {
-    MEDIUM_EVENTS.with(|q| q.head != q.tail)
 }
 
 pub fn normalize(path: &[u8]) -> Result<Path> {

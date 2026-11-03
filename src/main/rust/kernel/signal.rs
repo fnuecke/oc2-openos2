@@ -1,107 +1,69 @@
 // SPDX-License-Identifier: MIT
 
+use crate::api::time::TIME_NEVER;
 use crate::arch::KernelCell;
-use crate::drivers::uart;
-use crate::drivers::virtio::blk;
-use crate::drivers::virtio::console as vcon;
-use crate::drivers::virtio::input;
-use crate::drivers::virtio::snd;
-use crate::fs::MountText;
-use crate::fs::vfs::{self, Change};
-use crate::power::{self, Request};
 use crate::text::Text;
 use crate::time::app_wait;
+use core::ffi::CStr;
 
-pub enum Event {
-    Medium(MountText, Change),
-    Port(vcon::Vport),
-    Serial(Text<16>),
-    Sound(Text<16>),
-    Key(input::Key),
-    Power(Request),
+registry!(pub SOURCES: &'static dyn Source);
+
+pub type Value = Text<64>;
+
+pub trait Source: Sync {
+    fn pending(&self) -> bool;
+
+    fn take(&self) -> Option<Event>;
+
+    fn collect(&self) {}
+
+    fn deadline(&self) -> u64 {
+        TIME_NEVER
+    }
 }
 
-static STATE: KernelCell<State> = KernelCell::new(State { stage: Stage::Done, power_signaled: false });
+#[derive(Clone, Copy)]
+pub struct Event {
+    pub name: &'static CStr,
+    pub value: Option<Value>,
+    pub int_values: [i64; 2],
+    pub int_value_count: usize,
+    pub detail: Option<&'static CStr>,
+}
+
+impl Event {
+    pub const fn new(name: &'static CStr) -> Self {
+        Self { name, value: None, int_values: [0; 2], int_value_count: 0, detail: None }
+    }
+
+    pub fn with_value(name: &'static CStr, value: &[u8]) -> Self {
+        Self { value: Some(Value::of(value)), ..Self::new(name) }
+    }
+}
+
+static REMAINING: KernelCell<usize> = KernelCell::new(0);
 
 pub fn wait(deadline: u64) {
-    app_wait(pending, deadline.min(input::repeat_deadline()));
+    app_wait(pending, SOURCES.iter().map(|source| source.deadline()).fold(deadline, u64::min));
 }
 
 pub fn collect() {
-    vfs::poll_media();
-    STATE.with(|s| s.stage = Stage::Medium);
+    SOURCES.iter().for_each(|source| source.collect());
+    REMAINING.with(|remaining| *remaining = SOURCES.len());
 }
 
 pub fn next() -> Option<Event> {
-    STATE.with(|s| {
-        while s.stage != Stage::Done {
-            if let Some(signal) = s.take() {
-                return Some(signal);
+    REMAINING.with(|remaining| {
+        while *remaining > 0 {
+            if let Some(event) = SOURCES[SOURCES.len() - *remaining].take() {
+                return Some(event);
             }
-            s.stage = match s.stage {
-                Stage::Medium => Stage::Port,
-                Stage::Port => Stage::Serial,
-                Stage::Serial => Stage::Sound,
-                Stage::Sound => Stage::Keyboard,
-                Stage::Keyboard => Stage::Power,
-                Stage::Power | Stage::Done => Stage::Done,
-            };
+            *remaining -= 1;
         }
         None
     })
 }
 
 fn pending() -> bool {
-    vfs::medium_event_pending()
-        || (0..blk::count()).filter_map(blk::get).any(blk::Disk::change_pending)
-        || vcon::signal_ready()
-        || uart::signal_ready()
-        || snd::signal_ready()
-        || input::signal_ready()
-        || (power::requested().is_some() && !STATE.with(|s| s.power_signaled))
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Stage {
-    Done, // first, so that the state starts zeroed in the bss
-    Medium,
-    Port,
-    Serial,
-    Sound,
-    Keyboard,
-    Power,
-}
-
-struct State {
-    stage: Stage,
-    power_signaled: bool,
-}
-
-impl State {
-    fn take(&mut self) -> Option<Event> {
-        match self.stage {
-            Stage::Medium => {
-                let (path, change) = vfs::take_medium_event()?;
-                Some(Event::Medium(path, change))
-            }
-            Stage::Port => Some(Event::Port(vcon::take_signal()?)),
-            Stage::Serial => {
-                let mut path = Text::of(b"/dev/");
-                path.push(uart::name(uart::take_signal()?)?.as_bytes());
-                Some(Event::Serial(path))
-            }
-            Stage::Sound => {
-                let mut path = Text::of(b"/dev/");
-                path.push(snd::take_signal()?.as_bytes());
-                Some(Event::Sound(path))
-            }
-            Stage::Keyboard => Some(Event::Key(input::take_signal()?)),
-            Stage::Power => {
-                let request = power::requested().filter(|_| !self.power_signaled)?;
-                self.power_signaled = true;
-                Some(Event::Power(request))
-            }
-            Stage::Done => None,
-        }
-    }
+    SOURCES.iter().any(|source| source.pending())
 }

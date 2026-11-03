@@ -5,11 +5,12 @@ mod client;
 use super::vfs::{self, BackendFd, FileSystem, MountId};
 use super::{Error, Listing, Medium, MountInfo, MountText, OpenFlags, Result, Stat};
 use crate::arch::KernelCell;
-use crate::drivers::virtio::{Device, Driver};
+use crate::drivers::virtio::{Device, VDriver, VIRTIO_DRIVERS};
 use client::{DIR_BUFFER, Fid, Mount};
 use core::ffi::c_int;
 
-pub const DRIVER: Driver = Driver { id: 9, probe, keeps_config_change: false, interrupt_hook: None };
+register!(VIRTIO_DRIVERS, &VDriver { id: 9, probe, keeps_config_change: false, interrupt_hook: None });
+
 pub const MAX_FILES: usize = 8;
 pub const MAX_MOUNTS: usize = 2;
 

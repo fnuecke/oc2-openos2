@@ -1,23 +1,29 @@
 // SPDX-License-Identifier: MIT
 
 use super::plic::HandlerData;
-use super::{Driver, console, plic};
+use super::{DRIVERS, Driver, console, plic};
 use crate::api::time::TIME_NEVER;
 use crate::arch::{IrqCell, Mmio, irq_enabled, time_now};
 use crate::board::board;
 use crate::fdt::Node;
-use crate::fs::devfs::{self, Poll};
-use crate::fs::sysfs::{self, Content};
+use crate::fs::devfs::{self, DEVICES, Poll};
+use crate::fs::sysfs::{self, CLASSES, Content};
 use crate::fs::{Error, Name, Result};
 use crate::mem::HeapBuf;
+use crate::signal::{self, Event, SOURCES, Value};
 use crate::time::{entropy_add, wait};
 
-pub const DRIVER: Driver = Driver { compatible: &[b"ns16550a", b"ns16550"], probe };
+register!(DRIVERS, &DRIVER);
+register!(DEVICES, &Ttys);
+register!(CLASSES, &Ttys);
+register!(SOURCES, &Ttys);
+
+const DRIVER: Driver = Driver { compatible: &[b"ns16550a", b"ns16550"], probe };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Tty(pub usize);
 
-pub struct Ttys;
+struct Ttys;
 
 impl devfs::Device for Ttys {
     fn count(&self) -> usize {
@@ -66,6 +72,23 @@ impl sysfs::Class for Ttys {
     fn show(&self, index: usize, _: usize, out: &mut Content) -> Option<()> {
         write!(out, "{:#X}", base(Tty(index))?);
         Some(())
+    }
+}
+
+impl signal::Source for Ttys {
+    fn pending(&self) -> bool {
+        PORTS.with(|ports| ports.iter().flatten().any(Port::pending))
+    }
+
+    fn take(&self) -> Option<Event> {
+        let tty = PORTS.with(|ports| {
+            let index = ports.iter().position(|port| port.as_ref().is_some_and(Port::pending))?;
+            ports[index].as_mut()?.notified = true;
+            Some(Tty(index))
+        })?;
+        let mut path = Value::of(b"/dev/");
+        path.push(name(tty)?.as_bytes());
+        Some(Event { value: Some(path), ..Event::new(c"serial") })
     }
 }
 
@@ -143,18 +166,6 @@ pub fn write_console(s: &[u8]) {
             uart.write8(THR, c);
         }
     }
-}
-
-pub fn signal_ready() -> bool {
-    PORTS.with(|ports| ports.iter().flatten().any(Port::pending))
-}
-
-pub fn take_signal() -> Option<Tty> {
-    PORTS.with(|ports| {
-        let index = ports.iter().position(|port| port.as_ref().is_some_and(Port::pending))?;
-        ports[index].as_mut()?.notified = true;
-        Some(Tty(index))
-    })
 }
 
 pub fn set_baud(tty: Tty, baud: u32) -> bool {

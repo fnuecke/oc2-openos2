@@ -8,14 +8,9 @@ pub use disk::disk;
 use super::vfs::{BackendFd, FileSystem, MountId};
 use super::{Error, Kind, Listing, Name, OpenFlags, Result, Stat, trim_slashes};
 use crate::arch::KernelCell;
-use crate::drivers::fb::Framebuffers;
-use crate::drivers::uart::Ttys;
-use crate::drivers::virtio::console::Ports;
-use crate::drivers::virtio::input::Keymap;
-use crate::drivers::virtio::snd::Dsp;
 use core::ffi::c_int;
-use disk::Disks;
-use memory::Memory;
+
+registry!(pub DEVICES: &'static dyn Device);
 
 pub const MAX_FILES: usize = 8;
 
@@ -74,7 +69,7 @@ impl FileSystem for Devfs {
         if lookup(path)?.is_some() {
             return Err(Error::NotDir);
         }
-        for device in DEVICES {
+        for device in DEVICES.iter() {
             for name in (0..device.count()).filter_map(|i| device.name(i)) {
                 let _ = out.add(name.as_bytes(), Kind::Device);
             }
@@ -130,7 +125,6 @@ impl FileSystem for Devfs {
     }
 }
 
-const DEVICES: &[&dyn Device] = &[&Memory, &Disks, &Ttys, &Ports, &Framebuffers, &Dsp, &Keymap];
 static FILES: KernelCell<[Option<File>; MAX_FILES]> = KernelCell::new([None; MAX_FILES]);
 
 fn lookup(path: &[u8]) -> Result<Option<(usize, usize)>> {

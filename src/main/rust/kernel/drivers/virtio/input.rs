@@ -1,24 +1,28 @@
 // SPDX-License-Identifier: MIT
 
-use super::{Buf, Device, Driver, Virtq};
+use super::{Buf, Device, VDriver, VIRTIO_DRIVERS, Virtq};
 use crate::api::time::TIME_NEVER;
 use crate::arch::{IrqCell, KernelCell, time_now};
-use crate::fs::devfs;
-use crate::fs::sysfs::{self, Content};
+use crate::fs::devfs::{self, DEVICES};
+use crate::fs::sysfs::{self, CLASSES, Content};
 use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::HeapBuf;
+use crate::signal::{self, Event, SOURCES};
 use crate::time::{entropy_add, frequency};
 
-pub const DRIVER: Driver = Driver { id: 18, probe, keeps_config_change: false, interrupt_hook: Some(interrupt) };
+register!(VIRTIO_DRIVERS, &VDriver { id: 18, probe, keeps_config_change: false, interrupt_hook: Some(interrupt) });
+register!(CLASSES, &Keyboards);
+register!(SOURCES, &Keyboards);
+register!(DEVICES, &Keymap);
 
-pub struct Key {
+struct Key {
     pub keyboard: Name,
     pub down: bool,
     pub ch: Option<u32>,
     pub code: u16,
 }
 
-pub struct Keyboards;
+struct Keyboards;
 
 impl sysfs::Class for Keyboards {
     fn name(&self) -> &'static [u8] {
@@ -48,7 +52,30 @@ impl sysfs::Class for Keyboards {
     }
 }
 
-pub struct Keymap;
+impl signal::Source for Keyboards {
+    fn pending(&self) -> bool {
+        let now = time_now();
+        STATE.with(|state| state.active().iter().any(|k| k.ready(now)))
+    }
+
+    fn take(&self) -> Option<Event> {
+        let now = time_now();
+        let key = STATE
+            .with(|state| state.active().iter_mut().enumerate().find_map(|(index, k)| Some(k.take(now)?.key(index))))?;
+        Some(Event {
+            int_values: [key.ch.map_or(-1, i64::from), key.code as i64],
+            int_value_count: 2,
+            ..Event::with_value(if key.down { c"key_down" } else { c"key_up" }, key.keyboard.as_bytes())
+        })
+    }
+
+    fn deadline(&self) -> u64 {
+        let due = |k: &Keyboard| k.repeat.map_or(TIME_NEVER, |r| r.at);
+        STATE.with(|state| state.active().iter().map(due).min().unwrap_or(TIME_NEVER))
+    }
+}
+
+struct Keymap;
 
 impl devfs::Device for Keymap {
     fn count(&self) -> usize {
@@ -176,21 +203,6 @@ pub fn count() -> usize {
 
 pub fn name(index: usize) -> Option<Name> {
     (index < count()).then(|| input_name(index))
-}
-
-pub fn signal_ready() -> bool {
-    let now = time_now();
-    STATE.with(|state| state.active().iter().any(|k| k.ready(now)))
-}
-
-pub fn take_signal() -> Option<Key> {
-    let now = time_now();
-    STATE.with(|state| state.active().iter_mut().enumerate().find_map(|(index, k)| Some(k.take(now)?.key(index))))
-}
-
-pub fn repeat_deadline() -> u64 {
-    let due = |k: &Keyboard| k.repeat.map_or(TIME_NEVER, |r| r.at);
-    STATE.with(|state| state.active().iter().map(due).min().unwrap_or(TIME_NEVER))
 }
 
 fn probe(device: Device) -> bool {

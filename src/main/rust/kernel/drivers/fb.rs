@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
 
-use super::Driver;
+use super::{DRIVERS, Driver};
 use crate::api::kprintf;
 use crate::arch::{KernelCell, Mmio};
 use crate::fdt::Node;
-use crate::fs::devfs;
-use crate::fs::sysfs::{self, Content};
+use crate::fs::devfs::{self, DEVICES};
+use crate::fs::sysfs::{self, CLASSES, Content};
 use crate::fs::{Error, Name, Result};
 
-pub const DRIVER: Driver = Driver { compatible: &[b"simple-framebuffer"], probe };
+register!(DRIVERS, &Driver { compatible: &[b"simple-framebuffer"], probe });
+register!(DEVICES, &Framebuffers);
+register!(CLASSES, &Framebuffers);
 
-pub struct Framebuffers;
+struct Framebuffers;
 
 impl devfs::Device for Framebuffers {
     fn count(&self) -> usize {

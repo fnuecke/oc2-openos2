@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: MIT
 
-use super::{Buf, Device, Driver, Virtq};
+use super::{Buf, Device, VDriver, VIRTIO_DRIVERS, Virtq};
 use crate::arch::KernelCell;
 use crate::bytes::until_nul;
-use crate::fs::devfs::{self, Poll};
-use crate::fs::sysfs::{self, Content};
+use crate::fs::devfs::{self, DEVICES, Poll};
+use crate::fs::sysfs::{self, CLASSES, Content};
 use crate::fs::{Error, Name, OpenFlags, Result};
 use crate::mem::{HeapBuf, free, malloc};
-use core::ffi::c_char;
+use crate::signal::{self, Event, SOURCES, Value};
 
-pub const DRIVER: Driver = Driver { id: 3, probe, keeps_config_change: false, interrupt_hook: None };
+register!(VIRTIO_DRIVERS, &VDriver { id: 3, probe, keeps_config_change: false, interrupt_hook: None });
+register!(DEVICES, &Ports);
+register!(CLASSES, &Ports);
+register!(SOURCES, &Ports);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Vport(pub usize);
 
-pub struct Ports;
+struct Ports;
 
 impl devfs::Device for Ports {
     fn count(&self) -> usize {
@@ -99,6 +102,22 @@ impl sysfs::Class for Ports {
     }
 }
 
+impl signal::Source for Ports {
+    fn pending(&self) -> bool {
+        STATE.with(|state| state.ports().iter().any(Port::signal_due))
+    }
+
+    fn take(&self) -> Option<Event> {
+        STATE.with(|state| {
+            let port = state.ports().iter_mut().find(|port| port.signal_due())?;
+            port.notified = true;
+            port.blocked = false;
+            let value = port.named.then(|| Value::of(until_nul(&port.name)));
+            Some(Event { value, ..Event::new(c"port") })
+        })
+    }
+}
+
 const F_MULTIPORT: u32 = 1 << 1;
 const CONFIG_MAX_PORTS: u32 = 4;
 
@@ -148,24 +167,6 @@ pub fn vport_name(port: Vport) -> Option<Name> {
         write!(name, "{PORT_PREFIX}{}", port.0);
         name
     })
-}
-
-pub fn signal_ready() -> bool {
-    STATE.with(|state| state.ports().iter().any(Port::signal_due))
-}
-
-pub fn take_signal() -> Option<Vport> {
-    STATE.with(|state| {
-        let index = state.ports().iter().position(Port::signal_due)?;
-        let port = &mut state.ports()[index];
-        port.notified = true;
-        port.blocked = false;
-        Some(Vport(index))
-    })
-}
-
-pub fn name_ptr(port: Vport) -> Option<*const c_char> {
-    STATE.with(|state| state.ports().get(port.0).filter(|p| p.named).map(|p| p.name.as_ptr().cast()))
 }
 
 fn probe(device: Device) -> bool {

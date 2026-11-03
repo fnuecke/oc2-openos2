@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 
-use super::{Device, Name};
+use super::{DEVICES, Device, Name};
 use crate::arch::KernelCell;
 use crate::fs::Result;
 use crate::time::{GOLDEN_GAMMA, entropy, mix64};
 
-pub struct Memory;
+register!(DEVICES, &Memory);
+
+struct Memory;
 
 impl Device for Memory {
     fn count(&self) -> usize {

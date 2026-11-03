@@ -3,12 +3,9 @@
 use super::vfs::{BackendFd, FileSystem, MountId};
 use super::{Error, Kind, Listing, Name, OpenFlags, Result, Stat, next_name};
 use crate::arch::KernelCell;
-use crate::drivers::fb::Framebuffers;
-use crate::drivers::rtc::Clocks;
-use crate::drivers::uart::Ttys;
-use crate::drivers::virtio::console::Ports;
-use crate::drivers::virtio::input::Keyboards;
 use core::ffi::c_int;
+
+registry!(pub CLASSES: &'static dyn Class);
 
 pub const MAX_FILES: usize = 4;
 
@@ -97,7 +94,7 @@ impl FileSystem for Sysfs {
 
 const CONTENT_SIZE: usize = 72;
 const MAX_DEPTH: usize = 4;
-const CLASSES: &[&dyn Class] = &[&Framebuffers, &Keyboards, &Clocks, &Ttys, &Ports];
+
 static FILES: KernelCell<[Option<File>; MAX_FILES]> = KernelCell::new([None; MAX_FILES]);
 
 fn split(mut path: &[u8]) -> Option<([&[u8]; MAX_DEPTH], usize)> {

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-use super::{Buf, Device, Driver, Virtq};
+use super::{Buf, Device, VDriver, VIRTIO_DRIVERS, Virtq};
 use crate::arch::{KernelCell, time_now};
 use crate::mem::HeapBox;
 use crate::time::{frequency, wait};
 
-pub const DRIVER: Driver = Driver { id: 2, probe, keeps_config_change: true, interrupt_hook: None };
+register!(VIRTIO_DRIVERS, &VDriver { id: 2, probe, keeps_config_change: true, interrupt_hook: None });
+
 pub const SECTOR_SIZE: usize = 512;
 pub const MAX_DISKS: usize = 16;
 
