@@ -8,7 +8,7 @@ The OpenOS II kernel (/boot/Image) links the following software. Their license t
 - TLSF 3.1 by Matthew Conte, external/tlsf/ (BSD-3-Clause)
 - libgcc from GCC 12.2 (GPL-3.0 with the GCC Runtime Library Exception, which needs no notice)
 
-The date conversion in src/main/rust/src/time.rs follows Howard Hinnant's public domain algorithms.
+The date conversion in src/main/rust/kernel/time.rs follows Howard Hinnant's public domain algorithms.
 
 The keyboard layouts in /usr/share/keymaps/ on the disk image are generated from xkeyboard-config at
 build time. Its copyright and permission notices are in /usr/share/keymaps/COPYING.

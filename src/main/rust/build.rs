@@ -9,7 +9,7 @@ use std::fs;
 use std::process::Command;
 
 fn main() {
-    println!("cargo::rerun-if-changed=src/api");
+    println!("cargo::rerun-if-changed=kernel/api");
     println!("cargo::rerun-if-changed=cbindgen.toml");
     println!("cargo::rerun-if-changed=../c/kprintf.c");
     println!("cargo::rerun-if-changed=../../../external/tlsf");
@@ -20,7 +20,7 @@ fn main() {
     let status = Command::new("cbindgen")
         .args(["-q", "--config", "cbindgen.toml", "--output"])
         .arg(include.join("kernel.h"))
-        .arg("src/api/mod.rs")
+        .arg("kernel/api/mod.rs")
         .status()
         .unwrap();
     assert!(status.success());

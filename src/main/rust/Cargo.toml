@@ -11,7 +11,7 @@ publish = false
 links = "kernel"
 
 [lib]
-path = "src/lib.rs"
+path = "kernel/lib.rs"
 test = false
 doctest = false
 bench = false
