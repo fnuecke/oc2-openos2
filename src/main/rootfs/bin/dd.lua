@@ -38,7 +38,12 @@ if not operands["if"] or not operands.of or not bs or bs == 0 or (operands.count
   return shell.usage(USAGE)
 end
 for key in pairs(operands) do
-  if not ({["if"] = 1, of = 1, bs = 1, count = 1, skip = 1, seek = 1})[key] then
+  if not ({["if"] = 1, of = 1, bs = 1, count = 1, skip = 1, seek = 1, conv = 1})[key] then
+    return shell.usage(USAGE)
+  end
+end
+for flag in (operands.conv or ""):gmatch("[^,]+") do
+  if flag ~= "fsync" and flag ~= "fdatasync" then -- each write reaches the medium before it returns
     return shell.usage(USAGE)
   end
 end
