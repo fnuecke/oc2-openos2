@@ -66,8 +66,9 @@ local function step(t, ...)
     coroutine.close(t.co)
     if term.powerRequest(err) then
       error(err, 0)
+    elseif term.systemError(err) ~= "kill" then
+      io.stderr:write("thread ", t.id, ": ", tostring(err), "\n")
     end
-    io.stderr:write("thread ", t.id, ": ", tostring(err), "\n")
   end
   if console.interrupts() ~= interrupts then
     error("interrupted!", 0)
@@ -151,11 +152,10 @@ end
 
 function Thread:kill()
   remove(self)
-  if coroutine.status(self.co) == "suspended" then
+  if self == current then
+    error("killed", 0)
+  elseif coroutine.status(self.co) == "suspended" then
     coroutine.close(self.co)
-  else
-    self.co = coroutine.create(function() end)
-    coroutine.resume(self.co)
   end
 end
 

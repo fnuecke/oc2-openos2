@@ -312,7 +312,7 @@ function shell.run(path, ...)
     return toCode(result)
   elseif isExit(result) then
     return toCode(result.exit)
-  elseif term.powerRequest(result) then
+  elseif term.powerRequest(result) or term.systemError(result) == "kill" then
     error(result, 0)
   end
   io.stderr:write(result, "\n")

@@ -150,7 +150,8 @@ function term.key(timeout)
 end
 
 local SYSTEM_ERRORS = {
-  ["interrupted!"] = "interrupt", ["shutdown requested"] = "shutdown", ["reboot requested"] = "reboot"}
+  ["interrupted!"] = "interrupt", ["shutdown requested"] = "shutdown", ["reboot requested"] = "reboot",
+  ["killed"] = "kill"}
 
 function term.systemError(err)
   return SYSTEM_ERRORS[err]
