@@ -1,3 +1,4 @@
+local pretty = require("pretty")
 local system = require("system")
 local term = require("term")
 
@@ -41,7 +42,7 @@ local function step(history, env)
     end
     print(result[2])
   elseif result.n > 1 then
-    print(table.unpack(result, 2, result.n))
+    pretty.print(table.unpack(result, 2, result.n))
   end
   return true
 end
