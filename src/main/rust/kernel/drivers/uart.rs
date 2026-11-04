@@ -108,7 +108,7 @@ const IER_RX: u8 = 0x01;
 const IER_TX: u8 = 0x02;
 const FCR_ENABLE_CLEAR: u8 = 0x07;
 
-pub const CONSOLE: Tty = Tty(0);
+const CONSOLE: Tty = Tty(0);
 const CTRL_C: u8 = 0x03;
 const MAX_PORTS: usize = 5; // the console and 4 serial ports
 const FIFO_SIZE: usize = 16;
@@ -145,9 +145,40 @@ pub fn readable(tty: Tty) -> bool {
     with_port(tty.0, Port::readable).unwrap_or(false)
 }
 
+pub fn console() -> Tty {
+    PORTS
+        .with(|ports| ports.iter().position(|port| port.as_ref().is_some_and(|port| port.console)))
+        .map_or(CONSOLE, Tty)
+}
+
+pub fn set_console(tty: Tty) -> bool {
+    PORTS.with(|ports| {
+        if !ports.get(tty.0).is_some_and(Option::is_some) {
+            return false;
+        }
+        for (index, port) in ports.iter_mut().enumerate() {
+            if let Some(port) = port {
+                port.console = false;
+                if index == tty.0 {
+                    port.drain();
+                    port.rx.clear();
+                    port.notified = false;
+                    port.set_ier(port.ier | IER_RX);
+                    port.console = true;
+                }
+            }
+        }
+        true
+    })
+}
+
 pub fn write_console(s: &[u8]) {
-    let Some((uart, interrupt)) = PORTS.with(|ports| ports[CONSOLE.0].as_ref().map(|port| (port.uart, port.interrupt)))
-    else {
+    let Some((index, uart, interrupt)) = PORTS.with(|ports| {
+        ports
+            .iter()
+            .enumerate()
+            .find_map(|(i, port)| port.as_ref().filter(|p| p.console).map(|p| (i, p.uart, p.interrupt)))
+    }) else {
         return;
     };
     let mut bytes = s.iter().flat_map(|&c| [(c == b'\n').then_some(b'\r'), Some(c)]).flatten().peekable();
@@ -156,7 +187,7 @@ pub fn write_console(s: &[u8]) {
         if !empty() {
             if interrupt && irq_enabled() {
                 // The interrupt clears IER_TX again once the FIFO is empty.
-                with_port(CONSOLE.0, |port| port.set_ier(port.ier | IER_TX));
+                with_port(index, |port| port.set_ier(port.ier | IER_TX));
                 wait(empty, TIME_NEVER);
             } else {
                 while !empty() {}
@@ -221,9 +252,7 @@ fn is_uart(base: u64) -> bool {
 
 fn with_port<R>(index: usize, f: impl FnOnce(&mut Port) -> R) -> Option<R> {
     let result = PORTS.with(|ports| ports.get_mut(index)?.as_mut().map(f));
-    if index == CONSOLE.0 {
-        console::notify();
-    }
+    console::notify();
     result
 }
 

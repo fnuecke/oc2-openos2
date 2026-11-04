@@ -60,6 +60,16 @@ function completion.drives(word, include)
   return completion.matches(word, devices)
 end
 
+function completion.ports(word)
+  local ports = {}
+  for _, name in ipairs(fs.list("/dev") or {}) do
+    if name:find("^ttyS%d+$") then
+      ports[#ports + 1] = "/dev/" .. name
+    end
+  end
+  return completion.matches(word, ports)
+end
+
 function completion.commands(word, programsOnly)
   if word:find("/") then
     return completion.paths(word)

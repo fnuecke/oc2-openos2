@@ -20,3 +20,8 @@ extern "C" fn serial_set_baud(index: c_int, baud: u32) -> c_int {
 extern "C" fn serial_baud(index: c_int) -> u32 {
     usize::try_from(index).ok().map(Tty).and_then(uart::baud).unwrap_or(0)
 }
+
+#[unsafe(no_mangle)]
+extern "C" fn serial_set_console(index: c_int) -> c_int {
+    if usize::try_from(index).is_ok_and(|i| uart::set_console(Tty(i))) { 0 } else { -1 }
+}

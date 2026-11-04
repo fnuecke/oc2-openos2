@@ -350,8 +350,8 @@ fn write_all(mut data: &[u8], sink: &mut impl FnMut(&[u8]) -> Result<usize>) -> 
 }
 
 fn console_read(dst: &mut [u8]) -> Result<usize> {
-    time::app_wait(|| uart::readable(uart::CONSOLE), TIME_NEVER);
-    match uart::read(uart::CONSOLE, dst) {
+    time::app_wait(|| uart::readable(uart::console()), TIME_NEVER);
+    match uart::read(uart::console(), dst) {
         Err(Error::Again) => Ok(0),
         result => result,
     }

@@ -9,7 +9,8 @@ local MAX_HISTORY = 50
 local ESCAPE_TIMEOUT = 0.05
 local READ_SIZE = 4096
 
-local tty = assert(fcntl.open("/dev/ttyS0", fcntl.O_RDONLY))
+local consolePath = "/dev/ttyS0"
+local tty = assert(fcntl.open(consolePath, fcntl.O_RDONLY))
 
 local pending, position = "", 1
 local pendingInterrupts = 0
@@ -196,8 +197,27 @@ function term.column()
   return column
 end
 
+function term.console()
+  return consolePath
+end
+
 local pastedLines = {}
 local lineRest = "" -- the rest of a line read in part, see readFormat
+
+function term.setConsole(path)
+  local fd, reason = fcntl.open(path, fcntl.O_RDONLY)
+  if not fd then
+    return nil, reason
+  end
+  if not pcall(require("serial").setConsole, path) then
+    unistd.close(fd)
+    return nil, "Not a serial port"
+  end
+  unistd.close(tty)
+  tty, consolePath, pending, position = fd, path, "", 1
+  pastedLines, lineRest, lastWasCR = {}, "", false
+  return true
+end
 
 local function isWordByte(line, i)
   return line:sub(i, i):find("^[%w_]") ~= nil

@@ -410,9 +410,15 @@ static int l_serial_get_baud(lua_State *L) {
     return 1;
 }
 
+static int l_serial_set_console(lua_State *L) {
+    serial_set_console(check_serial(L));
+    return 0;
+}
+
 static const luaL_Reg serial_lib[] = {
     {"setBaud", l_serial_set_baud},
     {"getBaud", l_serial_get_baud},
+    {"setConsole", l_serial_set_console},
     {NULL, NULL},
 };
 
