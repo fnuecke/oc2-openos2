@@ -41,10 +41,18 @@ impl Fdt {
         if self.dtb.is_null() { &[] } else { unsafe { core::slice::from_raw_parts(self.dtb, self.size) } }
     }
 
+    pub fn root(self) -> Option<Node<'static>> {
+        let (structure, strings) = self.blocks()?;
+        if be32(structure, 0)? != BEGIN_NODE {
+            return None;
+        }
+        let name = until_nul(structure.get(4..)?);
+        let props = 4 + ((name.len() + 4) & !3);
+        Some(Node { name, parent: &[], structure, props, strings, address_cells: 2, size_cells: 1 })
+    }
+
     pub fn walk(self, f: &mut dyn FnMut(&Node<'static>)) {
-        let dt = self.as_bytes();
-        let block = |at| be32(dt, at).and_then(|offset| dt.get(offset as usize..));
-        let (Some(structure), Some(strings)) = (block(8), block(12)) else { return };
+        let Some((structure, strings)) = self.blocks() else { return };
 
         let mut stack = [(&[][..], 2, 1); MAX_DEPTH + 1];
         let mut depth = 0;
@@ -89,25 +97,73 @@ impl Fdt {
         });
         found
     }
+
+    fn blocks(self) -> Option<(&'static [u8], &'static [u8])> {
+        let dt = self.as_bytes();
+        let block = |at| be32(dt, at).and_then(|offset| dt.get(offset as usize..));
+        Some((block(8)?, block(12)?))
+    }
 }
 
 impl<'a> Node<'a> {
     pub fn prop(&self, name: &[u8]) -> Option<&'a [u8]> {
+        self.props().find(|&(n, _)| n == name).map(|(_, value)| value)
+    }
+
+    pub fn props(&self) -> impl Iterator<Item = (&'a [u8], &'a [u8])> + use<'a> {
+        let (structure, strings) = (self.structure, self.strings);
         let mut offset = self.props;
-        loop {
-            match be32(self.structure, offset)? {
-                PROP => {
-                    let length = be32(self.structure, offset + 4)? as usize;
-                    let at = offset + 12;
-                    if until_nul(self.strings.get(be32(self.structure, offset + 8)? as usize..)?) == name {
-                        return self.structure.get(at..at + length);
+        core::iter::from_fn(move || {
+            loop {
+                match be32(structure, offset)? {
+                    PROP => {
+                        let length = be32(structure, offset + 4)? as usize;
+                        let name = until_nul(strings.get(be32(structure, offset + 8)? as usize..)?);
+                        let at = offset + 12;
+                        offset = at + ((length + 3) & !3);
+                        return Some((name, structure.get(at..at + length)?));
                     }
-                    offset = at + ((length + 3) & !3);
+                    NOP => offset += 4,
+                    _ => return None,
                 }
-                NOP => offset += 4,
-                _ => return None,
             }
-        }
+        })
+    }
+
+    pub fn children(&self) -> impl Iterator<Item = Node<'a>> + use<'a> {
+        let cells = |name, default| self.u32(name).map_or(default, |n| n as usize);
+        let (address_cells, size_cells) = (cells(b"#address-cells", 2), cells(b"#size-cells", 1));
+        let (parent, structure, strings) = (self.name, self.structure, self.strings);
+        let mut offset = self.props;
+        let mut depth = 0;
+        core::iter::from_fn(move || {
+            loop {
+                let token = be32(structure, offset)?;
+                offset += 4;
+                match token {
+                    BEGIN_NODE => {
+                        let name = until_nul(structure.get(offset..)?);
+                        offset += (name.len() + 4) & !3;
+                        depth += 1;
+                        if depth == 1 {
+                            return Some(Node {
+                                name,
+                                parent,
+                                structure,
+                                props: offset,
+                                strings,
+                                address_cells,
+                                size_cells,
+                            });
+                        }
+                    }
+                    END_NODE if depth > 0 => depth -= 1,
+                    PROP => offset += 8 + ((be32(structure, offset)? as usize + 3) & !3),
+                    NOP => {}
+                    _ => return None,
+                }
+            }
+        })
     }
 
     pub fn u32(&self, name: &[u8]) -> Option<u32> {
