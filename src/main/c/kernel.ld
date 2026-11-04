@@ -29,6 +29,7 @@ SECTIONS {
         __registry_SOURCES_start = .; KEEP(*(.registry.SOURCES)) __registry_SOURCES_end = .;
     }
 
+    . = ALIGN(4096); /* separate read-only and writable segments */
     .data : {
         *(.data .data.* .sdata .sdata.*)
     }
