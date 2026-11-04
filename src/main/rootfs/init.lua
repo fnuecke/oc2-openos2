@@ -7,7 +7,7 @@ require("runtime.io")
 local system = require("system")
 local term = require("term")
 
-print(string.format("%s on OpenOS II, %d KiB free, booted in %.2f s",
+print(string.format("\27[2J\27[H%s on OpenOS II, %d KiB free, booted in %.2f s",
   _VERSION, computer.freeMemory() // 1024, computer.uptime()))
 
 local function handleError(err)

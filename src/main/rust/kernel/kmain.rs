@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use crate::api::{app_main, kprintf};
-use crate::arch::{
-    BOOT_PAGE_TABLE, PTE_LEAF, PageTable, RawCell, csr_write, irq_enable, pte, sfence_vma, time_now, trap_entry,
-};
+use crate::arch::{BOOT_PAGE_TABLE, PTE_LEAF, PageTable, RawCell, csr_write, irq_enable, pte, sfence_vma, trap_entry};
 use crate::board::{self, board, phys_to_virt, virt_to_phys};
 use crate::drivers::{self, plic};
 use crate::fs::vfs;
@@ -66,19 +64,12 @@ extern "C" fn kmain(dtb: u64) -> ! {
     let unmapped = add_memory();
     drivers::probe();
     if let Some(start) = unmapped {
-        unsafe { kprintf(c"openos2: ignoring memory at %lx\n".as_ptr(), start) };
+        unsafe { kprintf(c"system: ignoring memory at %lx\n".as_ptr(), start) };
     }
     vfs::mount_all();
 
-    let b = board();
-    let boot_ticks = time_now();
     unsafe {
-        kprintf(
-            c"openos2: %lu KiB RAM, %lu KiB heap, up %lu ms\n".as_ptr(),
-            b.ram_total / 1024,
-            mem::heap_total() / 1024,
-            boot_ticks / (b.timebase / 1000).max(1),
-        );
+        kprintf(c"system: %lu KiB RAM, %lu KiB heap\n".as_ptr(), board().ram_total / 1024, mem::heap_total() / 1024);
         app_main();
     }
     stdio::flush_all();

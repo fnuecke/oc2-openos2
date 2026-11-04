@@ -110,7 +110,7 @@ fn probe(node: &Node) {
     let fb = Framebuffer { mmio: unsafe { Mmio::new(base) }, width, height, stride };
     let format = node.prop(b"format").and_then(|f| f.strip_suffix(b"\0"));
     if format != Some(R5G6B5.as_bytes()) || fb.size() > length {
-        unsafe { kprintf(c"openos2: ignoring framebuffer at %lx\n".as_ptr(), base) };
+        unsafe { kprintf(c"system: ignoring framebuffer at %lx\n".as_ptr(), base) };
         return;
     }
     FRAMEBUFFERS.with(|fbs| {
