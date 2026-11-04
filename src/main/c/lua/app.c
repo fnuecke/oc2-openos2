@@ -9,6 +9,7 @@ int luaopen_console(lua_State *L);
 int luaopen_computer(lua_State *L);
 int luaopen_fs(lua_State *L);
 int luaopen_serial(lua_State *L);
+int luaopen_native(lua_State *L);
 int luaopen_cjson(lua_State *L);
 int luaopen_posix_errno(lua_State *L);
 int luaopen_posix_fcntl(lua_State *L);
@@ -39,6 +40,7 @@ static const luaL_Reg libraries[] = {
 
 static const luaL_Reg preloaded[] = {
     {"serial", luaopen_serial},
+    {"native", luaopen_native},
     {"cjson", luaopen_cjson},
     {"posix.errno", luaopen_posix_errno},
     {"posix.fcntl", luaopen_posix_fcntl},

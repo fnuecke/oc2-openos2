@@ -28,7 +28,7 @@ fn main() {
     let cjson = tc.cflags(&["-std=gnu99", "-Wall", "-flto", &include, "-include", &lua_conf, &lua]);
 
     let mut units = Vec::new();
-    for name in ["app", "luaapi", "lposix", "lsignal"] {
+    for name in ["app", "luaapi", "lnative", "lposix", "lsignal"] {
         units.push((tc.path(&format!("src/main/c/lua/{name}.c")), app.clone()));
     }
     for name in LUA {
