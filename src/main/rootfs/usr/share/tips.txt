@@ -1,0 +1,22 @@
+Run `motd` for another tip. To turn these tips off, remove `/init.d/10-motd.lua`.
+Refer to the manual for help on blocks, items and operating systems.
+Press Tab to complete commands and paths, and Up and Down to go through the history.
+Most programs print their usage with `--help`.
+Most programs can be stopped with Ctrl+C.
+The programs in `/bin` are Lua scripts. Read them with `less` to see how they work.
+Run `lsdev` to list the devices on the computer's bus.
+At the `lua` prompt, `require("devices"):find("redstone")` shows what a redstone interface can do.
+Run a command in the background by adding `&`. `jobs` to list, `kill %1` to stop.
+`edit <file>` opens a text editor. Ctrl+S saves, Ctrl+W closes.
+Commands in `/.shrc` run whenever the shell starts, e.g. aliases like `alias ll='ls -l'`.
+Files in `/init.d` run once at boot, before the shell starts.
+`crontab -e` runs commands at set times, like on Linux.
+Libraries in `/lib` can be loaded with `require` from any program.
+Drives are mounted at `/mnt/<label>`, or `/mnt/1` and up if they have no label.
+Floppies can be swapped while the computer runs.
+`format /dev/vdb` creates a file system on a new drive.
+Move files into and out of the game with the file import/export card: run `import` or `export`.
+`console /dev/ttyS1` moves the shell to a terminal attached through a serial card.
+`free` shows how much memory is in use. If you run out, add more memory to the computer.
+Have you tried turning it off and on again?
+Please report bugs on the GitHub issue tracker, thank you!
