@@ -176,16 +176,16 @@ end
 function term.write(...)
   for i = 1, select("#", ...) do
     local s = tostring((select(i, ...)))
-    console.write(s)
     local tail = s:match("[^\r\n]*$")
-    if #tail < #s then
-      column = 0
-    end
+    local after = #tail < #s and 0 or column
     local afterHome = tail:match("^.*\27%[[%d;]*H(.*)$")
     if afterHome then
-      column, tail = 0, afterHome
+      after, tail = 0, afterHome
     end
-    column = column + #tail:gsub("\27%[[%d;?]*%a", "")
+    after = after + #tail:gsub("\27%[[%d;?]*%a", "")
+    column = math.max(after, 1)
+    console.write(s)
+    column = after
   end
 end
 

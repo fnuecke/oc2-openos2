@@ -28,27 +28,46 @@ local function remove(t)
   end
 end
 
--- Ctrl+C does not hit threads, see coroutine.setBackground: one that came while the thread ran is
--- raised here, in the foreground.
-local function step(t, ...)
-  local previous, interrupts = current, console.interrupts()
+local function run(t, ...)
   current = t
   local active = system.streams(t.streams)
   local ok, blocked, kind, deadline = system.rawresume(t.co, ...)
   system.streams(active)
-  current = previous
+  current = nil
   if not ok then
     t.error = blocked
     remove(t)
-    coroutine.close(t.co)
-    if term.powerRequest(blocked) then
-      error(blocked, 0)
-    end
-    io.stderr:write("thread ", t.id, ": ", tostring(blocked), "\n")
   elseif coroutine.status(t.co) == "dead" then
     remove(t)
   else
     t.deadline = blocked == BLOCKED and kind == "wait" and deadline or 0
+  end
+  return ok, blocked
+end
+
+local function runner(...)
+  return runner(coroutine.yield(run(...)))
+end
+local scheduler
+
+-- Switch to and from threads in a background coroutine to avoid dropping Ctrl+C.
+local function step(t, ...)
+  if not scheduler or coroutine.status(scheduler) == "dead" then
+    scheduler = coroutine.create(runner)
+    coroutine.setBackground(scheduler)
+  end
+  local interrupts, active = console.interrupts(), system.streams()
+  local resumed, ok, err = system.rawresume(scheduler, t, ...)
+  if not resumed then
+    current = nil
+    system.streams(active)
+    error(ok, 0)
+  elseif not ok then
+    coroutine.close(t.co)
+    if term.powerRequest(err) then
+      error(err, 0)
+    end
+    io.stderr:write("thread ", t.id, ": ", tostring(err), "\n")
   end
   if console.interrupts() ~= interrupts then
     error("interrupted!", 0)
